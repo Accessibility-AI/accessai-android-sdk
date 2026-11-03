@@ -161,6 +161,7 @@ private fun StatusLine(state: DialogState, listening: ListeningState) {
         state is DialogState.Interpreting -> "Working…"
         state is DialogState.Executing -> "Working…"
         state is DialogState.AwaitingConfirmation -> "Waiting for your confirmation"
+        state is DialogState.AwaitingAuthentication -> "Confirm it's you on your phone's security check"
         state is DialogState.AwaitingInput -> "Waiting for your answer"
         state is DialogState.ReadingList -> "Reading ${state.index + 1} of ${state.items.size}"
         else -> "Ready"

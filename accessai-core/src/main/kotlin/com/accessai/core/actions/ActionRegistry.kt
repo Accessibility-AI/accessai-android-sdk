@@ -1,17 +1,27 @@
 package com.accessai.core.actions
 
+import com.accessai.core.auth.DeviceAuthenticator
 import com.accessai.core.protocol.ManifestAction
 import com.accessai.core.protocol.ManifestParam
 import java.util.concurrent.ConcurrentHashMap
 
-/** The allowlist. AccessAI can only ever invoke actions registered here. */
-public class ActionRegistry {
+/**
+ * The allowlist. AccessAI can only ever invoke actions registered here.
+ *
+ * [deviceAuthenticator] is required before any SENSITIVE action can be registered: no money moves without
+ * OS biometric or device-credential authentication.
+ */
+public class ActionRegistry(public val deviceAuthenticator: DeviceAuthenticator? = null) {
     private val actions = ConcurrentHashMap<String, ActionSpec>()
     private val order = mutableListOf<String>()
 
     public fun register(spec: ActionSpec) {
         synchronized(order) {
             require(spec.id !in RESERVED) { "'${spec.id}' is reserved for AccessAI's built-in commands" }
+            require(!spec.requiresDeviceAuth || deviceAuthenticator != null) {
+                "Action '${spec.id}' is SENSITIVE, so it needs a DeviceAuthenticator. Create the registry with one " +
+                    "(on Android, AccessAI provides it automatically)."
+            }
             if (actions.put(spec.id, spec) == null) order += spec.id
         }
     }

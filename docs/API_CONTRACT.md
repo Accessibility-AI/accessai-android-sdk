@@ -1,7 +1,11 @@
-# AccessAI service API — contract v1
+# AccessAI service API — contract v1.1
 
 This is the contract between the SDK (`accessai-core`, package `com.accessai.core.protocol`) and the AI service
 (`accessai-server`). Change both together and bump the version.
+
+**v1.1 (SDK 0.2.0):** device authentication for sensitive actions (`device_key` on sessions, `auth` on confirm,
+`auth_invalid` error, `amr` token claim) and data-handling rules (see [Privacy](#privacy-and-retention)). All new
+request fields are additive.
 
 - Base URL: configured by the host app (`AccessAIConfig.serverUrl`). HTTPS only in production.
 - All bodies are JSON, `snake_case`. Unknown fields must be ignored by both sides.
@@ -24,6 +28,7 @@ Any non-2xx response should have this body:
 | `not_a_confirmation` | 422 | `/confirm` with `method: "voice"` whose utterance is not an exact confirmation |
 | `confirmation_expired` | 410 | `/confirm` after `expires_at` |
 | `confirmation_used` | 409 | `/confirm` on a pending confirmation that was already confirmed or cancelled |
+| `auth_invalid` | 401 | `/confirm` for a sensitive action without a valid device-auth proof (see below) |
 | `rate_limited` | 429 | |
 | `server` | 5xx | |
 
@@ -31,10 +36,22 @@ Any non-2xx response should have this body:
 
 ```json
 // request
-{ "app_id": "accesspay-demo", "locale": "en-NG" }
+{
+  "app_id": "accesspay-demo",
+  "locale": "en-NG",
+  "device_key": {                                 // present when the phone has a screen lock
+    "kid": "3f9a0c1d22e4b6a7",                    // first 16 hex of SHA-256(public_key DER)
+    "alg": "ES256",
+    "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE…",   // base64 X.509 SubjectPublicKeyInfo DER
+    "attestation_chain": ["MIIC…", "MIIB…"]       // optional Android key attestation, leaf first
+  }
+}
 // response 200
 { "session_id": "s_8f2c…", "expires_at": "2026-10-29T13:00:00Z" }
 ```
+
+Store `device_key` with the session. Every sensitive confirmation in this session must be signed by it. Optionally
+verify `attestation_chain` to require hardware-backed keys.
 
 ## POST /v1/interpret
 
@@ -126,10 +143,36 @@ The SDK refuses to continue if the server's hash differs from its own. Suggested
 
 ```json
 // request
-{ "session_id": "s_…", "method": "voice", "utterance": "confirm transfer" }   // or { "method": "touch" }
+{
+  "session_id": "s_…",
+  "method": "voice",                              // or "touch" (no utterance)
+  "utterance": "confirm transfer",
+  "auth": {                                       // required for sensitive actions
+    "method": "biometric",                        // or "device_credential" (PIN / pattern / password)
+    "kid": "3f9a0c1d22e4b6a7",
+    "alg": "ES256",
+    "signature": "MEUCIQ…"                        // base64 DER ECDSA signature
+  }
+}
 // response 200
 { "status": "confirmed", "token": "<compact JWS>", "nonce": "8b0e…", "expires_at": "2026-10-29T12:01:00Z" }
 ```
+
+### Device authentication (sensitive actions)
+
+The SDK only calls `/confirm` after the phone's own lock screen (fingerprint or face, falling back to PIN, pattern
+or password) succeeded. It proves this with a signature from a Keystore key the OS unlocks only after that check.
+Before minting a token for a sensitive action, the service must:
+
+1. require `auth`, with `auth.kid` equal to the session's `device_key.kid`;
+2. rebuild the signed payload exactly (UTF-8):
+   `accessai-auth-v1|{session_id}|{pending_id}|{action_id}|{params_sha256}`;
+3. verify `auth.signature` with the session's public key (ECDSA P-256 / SHA-256, DER signature);
+4. otherwise return `auth_invalid` and **mint nothing**.
+
+Because the payload includes the pending id and the parameter hash, a proof can't be replayed for another request
+or different amounts. Put `auth.method` in the token as `amr` so the host backend has an audit trail. The service
+never receives a PIN, password or biometric; reject any request that seems to contain one.
 
 - For `voice`, re-check the utterance with a **strict, deterministic** grammar: accept only phrases like
   `confirm`, `confirm transfer`, `i confirm`, `yes confirm`. Reject anything containing a negation. No model.
@@ -143,6 +186,7 @@ The SDK refuses to continue if the server's hash differs from its own. Suggested
 | `aid` | action id |
 | `ph` | `params_sha256` |
 | `jti` | nonce (also returned as `nonce`) |
+| `amr` | `["biometric"]` or `["device_credential"]`: how the user authenticated (v1.1) |
 | `iat`, `exp` | issued-at, expiry (≤ 60 s) |
 
 ## POST /v1/confirmations/{pending_id}/cancel
@@ -160,3 +204,23 @@ executing a sensitive action:
 4. reject a `jti` it has already seen (use it as the idempotency key).
 
 Tokens from the SDK's offline `LocalRulesBackend` start with `dev-unsigned.` and must always be rejected in production.
+
+## Privacy and retention
+
+What the SDK guarantees before anything is sent (see `SECURITY.md` in the SDK):
+
+- utterances that look like a PIN, password, OTP or card code are blocked on the device and never sent;
+- 10+ digit numbers (account, card, phone, BVN) are replaced with `[number removed]`;
+- `screen` has no element `value`s, no sensitive or credential elements, and numbers/amounts in titles and labels
+  are replaced with `[number removed]` / `[amount]`. A `sensitive: true` screen (login, PIN) carries only its title;
+- `dialog.last_system_message` is always null (it could contain a balance).
+
+What the service must do:
+
+- **Reject** (`bad_request`) any `screen` with an element `value`, or with text matching an account-number pattern
+  (10+ digits). This is defence in depth for a misconfigured client.
+- Never send balances, beneficiary lists or screen values to an LLM.
+- **No retention:** don't store utterances or transcripts beyond the request. Logs mask amounts, names and
+  utterances. Keep only what confirmations need (pending id, session, action, params hash, status, timestamps).
+- Tell the host which LLM provider and region processes the text, so it can be disclosed to users
+  (Nigeria Data Protection Act 2023: cross-border transfer).

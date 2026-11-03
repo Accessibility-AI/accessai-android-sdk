@@ -1,6 +1,10 @@
 package com.accessai.core.engine
 
 import com.accessai.core.Announcement
+import com.accessai.core.auth.AuthChallenge
+import com.accessai.core.auth.AuthOutcome
+import com.accessai.core.privacy.SensitiveData
+import com.accessai.core.protocol.AuthProof
 import com.accessai.core.actions.ActionContext
 import com.accessai.core.actions.ActionRegistry
 import com.accessai.core.actions.ActionResult
@@ -76,10 +80,18 @@ public class DialogEngine(
 
     /** Handles one user utterance (spoken or typed). Calls are processed one at a time. */
     public suspend fun submit(text: String, source: InputSource = InputSource.VOICE): Unit = mutex.withLock {
-        val raw = text.trim()
-        if (raw.isEmpty()) {
+        if (text.isBlank()) {
             say(Announcement.of("I didn't catch that. Please try again, or type your request."))
             return@withLock
+        }
+        // Before anything else: PINs and passwords are dropped, long numbers redacted. The raw text goes nowhere.
+        val raw = when (val check = SensitiveData.inspectUtterance(text.trim())) {
+            SensitiveData.Check.Blocked -> {
+                addTranscript(Speaker.USER, "[not sent: it may have contained a PIN or password]")
+                say(Announcement.of(SensitiveData.BLOCKED_MESSAGE))
+                return@withLock
+            }
+            is SensitiveData.Check.Allowed -> check.text
         }
         addTranscript(Speaker.USER, raw)
         val norm = LocalGrammar.normalize(raw)
@@ -151,12 +163,14 @@ public class DialogEngine(
         }
     }
 
-    /** Clears everything, e.g. when accessibility mode is turned off. Cancels a pending confirmation. */
+    /** Clears everything, e.g. when accessibility mode is turned off: pending confirmation, transcript, last response. */
     public suspend fun reset(): Unit = mutex.withLock {
         pending?.let { cancelRemote(it) }
         pending = null
         draft = null
         speech.stop()
+        _transcript.value = emptyList()
+        _lastAnnouncement.value = null
         _state.value = DialogState.Idle
     }
 
@@ -181,7 +195,7 @@ public class DialogEngine(
                 sessionId = ensureSession(),
                 text = raw,
                 locale = config.locale,
-                screen = _screen.value,
+                screen = SensitiveData.screenForTransport(_screen.value),
                 actions = registry.manifest(),
                 dialog = dialogContext(),
             ),
@@ -353,13 +367,13 @@ public class DialogEngine(
             return
         }
         if (!ticket.paramsSha256.equals(localHash, ignoreCase = true)) {
-            cancelRemote(PendingConfirmation(spec, d, params, ticket.pendingId, Instant.EPOCH))
+            cancelRemote(PendingConfirmation(spec, d, params, ticket.pendingId, Instant.EPOCH, localHash))
             _state.value = DialogState.Idle
             say(Announcement.of("Something didn't match while preparing your request, so I stopped. Nothing was sent."))
             return
         }
         val expiresAt = runCatching { Instant.parse(ticket.expiresAt) }.getOrElse { clock().plusSeconds(60) }
-        pending = PendingConfirmation(spec, d, params, ticket.pendingId, expiresAt)
+        pending = PendingConfirmation(spec, d, params, ticket.pendingId, expiresAt, localHash)
 
         val summary = spec.summary!!(params)
         val prompt = Announcement(
@@ -432,11 +446,65 @@ public class DialogEngine(
             say(Announcement.of("That confirmation has expired, so nothing was sent. Please make the request again."))
             return
         }
+        val session = try {
+            ensureSession()
+        } catch (e: BackendException) {
+            _state.value = DialogState.Idle
+            say(connectivityMessage(e, "confirm your request").plus(Announcement.of("Nothing was sent.")))
+            return
+        }
+
+        // Device authentication: the OS checks it's the account holder before any token can exist.
+        var proof: AuthProof? = null
+        if (p.spec.requiresDeviceAuth) {
+            val authenticator = checkNotNull(registry.deviceAuthenticator) { "SENSITIVE action registered without authenticator" }
+            _state.value = DialogState.AwaitingAuthentication(p.spec.id)
+            say(Announcement.of("To confirm it's you, use your fingerprint, face, or screen lock now."))
+            val challenge = AuthChallenge(session, p.pendingId, p.spec.id, p.paramsSha256, p.spec.summary!!(p.params))
+            val outcome = try {
+                authenticator.authenticate(challenge)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AuthOutcome.Failed("Your phone couldn't check it's you.")
+            }
+            when (outcome) {
+                is AuthOutcome.Authenticated -> proof = outcome.proof
+                is AuthOutcome.Unavailable -> {
+                    cancelRemote(p)
+                    _state.value = DialogState.Idle
+                    say(Announcement.of("${outcome.message} Nothing was sent."))
+                    return
+                }
+                AuthOutcome.Cancelled, is AuthOutcome.Failed -> {
+                    p.authAttempts++
+                    val why = (outcome as? AuthOutcome.Failed)?.message ?: "You closed the check."
+                    if (p.authAttempts >= config.maxAuthAttempts) {
+                        cancelRemote(p)
+                        _state.value = DialogState.Idle
+                        say(Announcement.of("$why I've cancelled the request. Nothing was sent."))
+                    } else {
+                        // Nothing was signed, so the same pending confirmation can be retried.
+                        pending = p
+                        _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt)
+                        say(Announcement.of("$why Nothing was sent. Say \"${p.spec.confirmPhrase}\" to try again, or \"cancel\" to stop."))
+                    }
+                    return
+                }
+            }
+        }
+
         _state.value = DialogState.Executing(p.spec.id)
         val confirmed = try {
-            backend.confirm(p.pendingId, ConfirmRequest(ensureSession(), method, utterance))
+            backend.confirm(p.pendingId, ConfirmRequest(session, method, utterance, proof))
         } catch (e: BackendException) {
             when (e.code) {
+                BackendException.AUTH_INVALID -> {
+                    // E.g. new fingerprint enrolled: the device key changed. Re-register it on the next session.
+                    sessionId = null
+                    _state.value = DialogState.Idle
+                    say(Announcement.of("I couldn't verify it was you, so nothing was sent. Please make the request again."))
+                }
                 BackendException.NOT_A_CONFIRMATION -> {
                     pending = p
                     _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt)
@@ -581,8 +649,19 @@ public class DialogEngine(
 
     // ---- Helpers ----------------------------------------------------------------------------
 
-    private suspend fun ensureSession(): String =
-        sessionId ?: backend.createSession(CreateSessionRequest(config.appId, config.locale)).sessionId.also { sessionId = it }
+    private suspend fun ensureSession(): String {
+        sessionId?.let { return it }
+        val deviceKey = registry.deviceAuthenticator?.let { auth ->
+            try {
+                auth.deviceKey()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        }
+        return backend.createSession(CreateSessionRequest(config.appId, config.locale, deviceKey)).sessionId.also { sessionId = it }
+    }
 
     private fun dialogContext(): DialogContext {
         val p = pending
@@ -598,7 +677,8 @@ public class DialogEngine(
             filledParams = d?.raw?.mapValues { it.value.toJson() } ?: emptyMap(),
             missingParams = d?.spec?.params?.filter { it.required && it.name !in d.raw }?.map { it.name } ?: emptyList(),
             awaiting = if (d == null) "none" else awaiting,
-            lastSystemMessage = _lastAnnouncement.value?.spoken,
+            // Never sent: AccessAI's last message may contain a balance or a beneficiary's name.
+            lastSystemMessage = null,
         )
     }
 
@@ -657,5 +737,8 @@ public class DialogEngine(
         val params: ResolvedParams,
         val pendingId: String,
         val expiresAt: Instant,
-    )
+        val paramsSha256: String,
+    ) {
+        var authAttempts = 0
+    }
 }

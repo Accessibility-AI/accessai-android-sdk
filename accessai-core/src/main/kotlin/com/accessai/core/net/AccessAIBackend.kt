@@ -36,5 +36,7 @@ public class BackendException(
         public const val NOT_A_CONFIRMATION: String = "not_a_confirmation"
         public const val CONFIRMATION_EXPIRED: String = "confirmation_expired"
         public const val CONFIRMATION_USED: String = "confirmation_used"
+        /** Missing, invalid, or signed by a key other than the session's device key. */
+        public const val AUTH_INVALID: String = "auth_invalid"
     }
 }

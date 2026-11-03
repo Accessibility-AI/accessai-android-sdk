@@ -16,7 +16,11 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import com.accessai.core.protocol.DeviceKeyInfo
+import java.security.KeyFactory
 import java.security.MessageDigest
+import java.security.Signature
+import java.security.spec.X509EncodedKeySpec
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -36,9 +40,13 @@ public class LocalRulesBackend(
     private class Pending(val sessionId: String, val actionId: String, val paramsSha256: String, val expiresAt: Instant, var used: Boolean = false)
 
     private val pending = ConcurrentHashMap<String, Pending>()
+    private val deviceKeys = ConcurrentHashMap<String, DeviceKeyInfo>()
 
-    override suspend fun createSession(request: CreateSessionRequest): CreateSessionResponse =
-        CreateSessionResponse(sessionId = "local-" + UUID.randomUUID())
+    override suspend fun createSession(request: CreateSessionRequest): CreateSessionResponse {
+        val id = "local-" + UUID.randomUUID()
+        request.deviceKey?.let { deviceKeys[id] = it }
+        return CreateSessionResponse(sessionId = id)
+    }
 
     override suspend fun interpret(request: InterpretRequest): InterpretResponse {
         val norm = LocalGrammar.normalize(request.text)
@@ -80,6 +88,14 @@ public class LocalRulesBackend(
         if (clock() > p.expiresAt) throw BackendException(BackendException.CONFIRMATION_EXPIRED, "Confirmation expired")
         if (request.method == "voice" && !isServerConfirm(request.utterance.orEmpty())) {
             throw BackendException(BackendException.NOT_A_CONFIRMATION, "Not a confirmation")
+        }
+        // Same check the real service must make: a session with a device key needs a valid signature from it.
+        deviceKeys[p.sessionId]?.let { key ->
+            val auth = request.auth ?: throw BackendException(BackendException.AUTH_INVALID, "Device authentication required")
+            val payload = "accessai-auth-v1|${p.sessionId}|$pendingId|${p.actionId}|${p.paramsSha256}"
+            if (auth.kid != key.kid || !verifyEs256(key.publicKey, payload, auth.signature)) {
+                throw BackendException(BackendException.AUTH_INVALID, "Device authentication failed")
+            }
         }
         p.used = true
         val nonce = UUID.randomUUID().toString()
@@ -131,6 +147,15 @@ public class LocalRulesBackend(
         val n = LocalGrammar.normalize(utterance)
         return Regex("^(yes |i )?confirm( [a-z]+){0,2}$").matches(n) && NEGATIONS.none { n.contains(it) }
     }
+
+    private fun verifyEs256(publicKeyB64: String, payload: String, signatureB64: String): Boolean = runCatching {
+        val key = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)))
+        Signature.getInstance("SHA256withECDSA").run {
+            initVerify(key)
+            update(payload.toByteArray(Charsets.UTF_8))
+            verify(Base64.getDecoder().decode(signatureB64))
+        }
+    }.getOrDefault(false)
 
     private fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }

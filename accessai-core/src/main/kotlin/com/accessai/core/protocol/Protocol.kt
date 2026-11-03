@@ -13,6 +13,32 @@ import kotlinx.serialization.json.JsonObject
 public data class CreateSessionRequest(
     @SerialName("app_id") val appId: String,
     val locale: String,
+    /** The device key that must sign every sensitive confirmation in this session. */
+    @SerialName("device_key") val deviceKey: DeviceKeyInfo? = null,
+)
+
+/** Public half of an OS-protected device key. The private half never leaves the phone's secure hardware. */
+@Serializable
+public data class DeviceKeyInfo(
+    /** Key id: first 16 hex chars of SHA-256 of [publicKey]'s DER bytes. */
+    val kid: String,
+    /** "ES256": ECDSA P-256 with SHA-256. */
+    val alg: String,
+    /** Base64 (standard) X.509 SubjectPublicKeyInfo DER. */
+    @SerialName("public_key") val publicKey: String,
+    /** Optional Android key attestation chain, base64 DER certificates, leaf first. */
+    @SerialName("attestation_chain") val attestationChain: List<String>? = null,
+)
+
+/** Proof that the OS authenticated the user for one specific pending confirmation. */
+@Serializable
+public data class AuthProof(
+    /** "biometric" or "device_credential" (PIN, pattern or password), as reported by the OS. */
+    val method: String,
+    val kid: String,
+    val alg: String,
+    /** Base64 (standard) DER ECDSA signature over the UTF-8 challenge payload. */
+    val signature: String,
 )
 
 @Serializable
@@ -98,6 +124,8 @@ public data class ConfirmRequest(
     /** "voice" or "touch". */
     val method: String,
     val utterance: String? = null,
+    /** Required for sensitive actions: device authentication bound to this pending confirmation. */
+    val auth: AuthProof? = null,
 )
 
 @Serializable

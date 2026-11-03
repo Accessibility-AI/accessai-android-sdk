@@ -2,6 +2,7 @@ package com.accessai.android
 
 import android.content.Context
 import com.accessai.core.actions.ActionSpec
+import com.accessai.core.auth.DeviceAuthenticator
 import com.accessai.core.net.AccessAIBackend
 import com.accessai.core.net.HttpAccessAIBackend
 import com.accessai.core.net.LocalRulesBackend
@@ -27,6 +28,11 @@ public data class AccessAIConfig(
     val announceScreenChanges: Boolean = true,
     /** Text-to-speech rate; 1.0 is normal. */
     val speechRate: Float = 0.95f,
+    /**
+     * Device authentication for SENSITIVE actions. Null (the default) uses [BiometricDeviceAuthenticator]:
+     * fingerprint or face with a PIN / pattern / password fallback. Replace it only with an equivalent OS-backed check.
+     */
+    val deviceAuthenticator: DeviceAuthenticator? = null,
 )
 
 /**

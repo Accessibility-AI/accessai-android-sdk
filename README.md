@@ -32,7 +32,7 @@ Part of AccessAI:
 See [docs/INTEGRATION.md](docs/INTEGRATION.md). The service contract is in [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ```kotlin
-implementation("com.github.Caculuz-cinks.accessai-android-sdk:accessai-compose:0.1.0")
+implementation("com.github.Caculuz-cinks.accessai-android-sdk:accessai-compose:0.2.0")
 ```
 
 ## How a transfer flows
@@ -43,8 +43,13 @@ implementation("com.github.Caculuz-cinks.accessai-android-sdk:accessai-compose:0
 4. Your validator checks the balance. The SDK reads back: "You are about to send five thousand naira to David Adeyemi,
    account ending 2 3 9 1. Say "confirm transfer" to continue, or "cancel" to stop."
 5. Only "confirm transfer" (or the Confirm button) counts. "Yes", "okay", silence and "don't confirm" do not.
-6. The service issues a signed, 60-second, single-use token bound to the exact parameters.
-7. Your handler runs once with the token and an idempotency key. Success is announced only if it returns `Success`.
+6. The phone's own security check runs: fingerprint or face, or the PIN / pattern / password fallback. AccessAI
+   never sees any of it, only a signature from a key the OS unlocks after the check succeeds.
+7. The service checks that signature, then issues a signed, 60-second, single-use token bound to the exact parameters.
+8. Your handler runs once with the token and an idempotency key. Success is announced only if it returns `Success`.
+
+PINs and passwords said aloud are dropped on the phone, and account numbers and screen values are redacted before
+anything is sent. See [SECURITY.md](SECURITY.md) for every enforced rule.
 
 ## Building
 
@@ -59,4 +64,4 @@ Locally you need only JDK 17 to build and test the core, which holds all of the 
 
 ## Status
 
-v0.1.0, hackathon MVP. English only. Simulated funds only. Not a compliance certification.
+v0.2.0, hackathon MVP. English only. Simulated funds only. Not a compliance certification.

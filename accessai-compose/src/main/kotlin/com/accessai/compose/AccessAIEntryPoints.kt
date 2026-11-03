@@ -75,7 +75,8 @@ public fun AccessAIConsentScreen(
             Paragraph("AccessAI lets you use $appName by speaking or typing. You can check your balance, send money, and hear your transactions read aloud.")
             Paragraph("When you speak, your phone's speech service turns your voice into text. AccessAI does not record or keep your voice.")
             Paragraph("The text of your request is sent to $serverName to work out what you want. Your balance and account details stay in $appName and are not sent.")
-            Paragraph("AccessAI will always read back a payment and wait for you to say \"confirm\" or tap Confirm before anything is sent. You can say \"cancel\" at any time.")
+            Paragraph("AccessAI will always read back a payment and wait for you to say \"confirm\" or tap Confirm. Then your phone's own security check (fingerprint, face, or screen lock) must succeed before anything is sent. You can say \"cancel\" at any time.")
+            Paragraph("Never say your PIN, password or one-time code out loud. AccessAI ignores them and never asks for them; your phone or $appName will ask on its own screen.")
             Paragraph("Microphone access is optional. If you say no, you can type instead. You can turn AccessAI off at any time with the \"Turn off AccessAI\" button.")
             Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
                 Text("Continue", style = MaterialTheme.typography.labelLarge)

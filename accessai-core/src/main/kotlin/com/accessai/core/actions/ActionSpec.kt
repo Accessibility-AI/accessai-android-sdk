@@ -76,6 +76,9 @@ public class ActionSpec internal constructor(
     internal val handler: suspend (ActionContext) -> ActionResult,
 ) {
     public fun param(name: String): ParamSpec? = params.firstOrNull { it.name == name }
+
+    /** Sensitive actions need OS biometric or device-credential authentication before a token is requested. */
+    public val requiresDeviceAuth: Boolean get() = sensitivity == Sensitivity.SENSITIVE
 }
 
 /**
@@ -148,6 +151,14 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
     internal fun build(): ActionSpec {
         require(ID_PATTERN.matches(id)) { "Action id '$id' must be lower_snake_case" }
         require(params.map { it.name }.toSet().size == params.size) { "Action '$id' has duplicate parameter names" }
+        // AccessAI never collects credentials. Login and PIN entry always stay on the host's own screens.
+        (listOf(id) + params.map { it.name }).firstOrNull { CREDENTIAL_NAME.containsMatchIn(it) }?.let {
+            throw IllegalArgumentException("Action '$id': '$it' looks like a credential. AccessAI never collects PINs, passwords, OTPs or card details")
+        }
+        // Anything that takes an amount moves money, so it must be SENSITIVE (read-back, confirmation, device auth).
+        require(params.none { it.type == ParamType.AmountMinor } || sensitivity == Sensitivity.SENSITIVE) {
+            "Action '$id' takes an amount, so it must be sensitivity = Sensitivity.SENSITIVE"
+        }
         val confirm = requiresConfirmation || sensitivity == Sensitivity.SENSITIVE
         require(!confirm || summary != null) { "Action '$id' requires confirmation, so it must define summary { }" }
         return ActionSpec(
@@ -167,5 +178,9 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
 
     private companion object {
         val ID_PATTERN = Regex("[a-z][a-z0-9_]{1,63}")
+        val CREDENTIAL_NAME = Regex(
+            // "open_login" is fine (navigation); collecting a password is not.
+            "(^|_)(pin|pins|password|passwd|passcode|otp|cvv|cvc|bvn|nin|card_number|pan|secret|credential|credentials)(_|$)",
+        )
     }
 }

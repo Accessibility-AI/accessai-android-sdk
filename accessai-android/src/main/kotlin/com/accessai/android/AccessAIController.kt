@@ -1,7 +1,9 @@
 package com.accessai.android
 
 import android.Manifest
+import android.app.Application
 import android.content.Context
+import com.accessai.core.auth.DeviceAuthenticator
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import com.accessai.core.Announcement
@@ -29,7 +31,11 @@ public class AccessAIController internal constructor(
     public val config: AccessAIConfig,
     backend: AccessAIBackend,
 ) {
-    public val registry: ActionRegistry = ActionRegistry()
+    /** Every SENSITIVE action goes through this before a token is requested. There is no way to turn it off. */
+    public val deviceAuthenticator: DeviceAuthenticator =
+        config.deviceAuthenticator ?: BiometricDeviceAuthenticator(context.applicationContext as Application)
+
+    public val registry: ActionRegistry = ActionRegistry(deviceAuthenticator)
 
     private val speechOut = AndroidSpeechOutput(context, config.locale, config.deferToScreenReader, config.speechRate)
     private val speechIn = AndroidSpeechInput(context, config.locale)

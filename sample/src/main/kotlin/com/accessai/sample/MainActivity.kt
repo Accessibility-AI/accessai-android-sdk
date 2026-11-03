@@ -1,7 +1,7 @@
 package com.accessai.sample
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +33,8 @@ import com.accessai.core.format.Naira
 import com.accessai.core.screen.ScreenDescriptor
 import com.accessai.core.screen.ScreenElement
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity (not ComponentActivity) so the biometric / screen-lock prompt can be shown.
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

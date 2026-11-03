@@ -30,6 +30,8 @@ kotlin {
 
 dependencies {
     api(project(":accessai-core"))
+    // api: hosts show AccessAI from a FragmentActivity, which BiometricPrompt needs.
+    api(libs.androidx.biometric)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 }

@@ -27,6 +27,9 @@ public sealed interface DialogState {
         val expiresAt: Instant,
     ) : DialogState
 
+    /** The OS biometric / screen-lock prompt is showing. No token exists yet. */
+    public data class AwaitingAuthentication(val actionId: String) : DialogState
+
     /** The host handler is running. */
     public data class Executing(val actionId: String) : DialogState
 
@@ -64,5 +67,8 @@ public data class EngineConfig(
     val actionTimeoutMillis: Long = 20_000,
     /** Announce the title of a newly published screen (suppressed while an action is running). */
     val announceScreenChanges: Boolean = true,
+    /** Transcript is in memory only, capped, and cleared on reset. It is never written to disk or sent anywhere. */
     val transcriptLimit: Int = 50,
+    /** Failed or cancelled device-auth attempts allowed before the pending action is cancelled. */
+    val maxAuthAttempts: Int = 3,
 )

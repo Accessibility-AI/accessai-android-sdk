@@ -15,8 +15,18 @@ import com.accessai.core.engine.EngineConfig
 import com.accessai.core.engine.SpeechOutput
 import com.accessai.core.net.AccessAIBackend
 import com.accessai.core.net.LocalRulesBackend
+import com.accessai.core.auth.AuthChallenge
+import com.accessai.core.auth.AuthOutcome
+import com.accessai.core.auth.DeviceAuthenticator
+import com.accessai.core.protocol.AuthProof
+import com.accessai.core.protocol.DeviceKeyInfo
 import kotlinx.coroutines.delay
+import java.security.KeyPairGenerator
+import java.security.MessageDigest
+import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 import java.time.Instant
+import java.util.Base64
 
 class RecordingSpeech : SpeechOutput {
     val spoken = mutableListOf<String>()
@@ -53,7 +63,35 @@ class FakeBank {
     }
 }
 
-fun registryFor(bank: FakeBank): ActionRegistry = ActionRegistry().apply {
+/** Stands in for BiometricPrompt + Keystore: a real P-256 key, real signatures, scripted outcomes. */
+class FakeAuthenticator : DeviceAuthenticator {
+    private val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+    private val publicKey = Base64.getEncoder().encodeToString(keyPair.public.encoded)
+    val kid = MessageDigest.getInstance("SHA-256").digest(keyPair.public.encoded).joinToString("") { "%02x".format(it) }.take(16)
+
+    /** Outcomes to return, in order; when empty, authentication succeeds. */
+    val script = ArrayDeque<AuthOutcome>()
+    val challenges = mutableListOf<AuthChallenge>()
+    var signWithWrongKey = false
+
+    override suspend fun deviceKey() = DeviceKeyInfo(kid, "ES256", publicKey)
+
+    override suspend fun authenticate(challenge: AuthChallenge): AuthOutcome {
+        challenges += challenge
+        script.removeFirstOrNull()?.let { return it }
+        val signingKey = if (signWithWrongKey) {
+            KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair().private
+        } else keyPair.private
+        val signature = Signature.getInstance("SHA256withECDSA").run {
+            initSign(signingKey)
+            update(challenge.payload.toByteArray())
+            sign()
+        }
+        return AuthOutcome.Authenticated(AuthProof("biometric", kid, "ES256", Base64.getEncoder().encodeToString(signature)))
+    }
+}
+
+fun registryFor(bank: FakeBank, auth: DeviceAuthenticator? = FakeAuthenticator()): ActionRegistry = ActionRegistry(auth).apply {
     register(action("get_balance") {
         name = "check your balance"
         description = "Read the user's available balance"
@@ -112,7 +150,8 @@ class Harness(
     backendOverride: ((() -> Instant) -> AccessAIBackend)? = null,
 ) {
     val speech = RecordingSpeech()
+    val auth = FakeAuthenticator()
     val clock: () -> Instant = { now }
     val backend: AccessAIBackend = backendOverride?.invoke(clock) ?: LocalRulesBackend(clock)
-    val engine = DialogEngine(registryFor(bank), backend, speech, EngineConfig(appId = "test", actionTimeoutMillis = 1_000), clock)
+    val engine = DialogEngine(registryFor(bank, auth), backend, speech, EngineConfig(appId = "test", actionTimeoutMillis = 1_000), clock)
 }

@@ -65,6 +65,8 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // Keep voice on the phone where an offline model is installed.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
         r.startListening(intent)
     }
