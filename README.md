@@ -15,7 +15,7 @@ Part of AccessAI:
 | Repo | What |
 |---|---|
 | **accessai-android-sdk** (this) | Kotlin SDK: action registry, dialog engine, speech, accessible Compose UI |
-| [accessai-server](https://github.com/Accessibility-AI/accessai-server) | AI service: interpretation, confirmation tokens |
+| [accessai-server-gemini](https://github.com/Accessibility-AI/accessai-server-gemini) | AI service (Gemini): interpretation, confirmation tokens |
 | [accesspay-demo](https://github.com/Accessibility-AI/accesspay-demo) | Demo fintech app + mock bank that integrate this SDK |
 
 ## Modules

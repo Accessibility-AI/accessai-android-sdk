@@ -1,7 +1,7 @@
 # AccessAI service API — contract v1.1
 
 This is the contract between the SDK (`accessai-core`, package `com.accessai.core.protocol`) and the AI service
-(`accessai-server`). Change both together and bump the version.
+(`accessai-server-gemini`). Change both together and bump the version.
 
 **v1.1 (SDK 0.2.0):** device authentication for sensitive actions (`device_key` on sessions, `auth` on confirm,
 `auth_invalid` error, `amr` token claim) and data-handling rules (see [Privacy](#privacy-and-retention)). All new
