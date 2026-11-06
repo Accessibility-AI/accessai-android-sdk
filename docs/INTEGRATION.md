@@ -16,7 +16,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.Caculuz-cinks.accessai-android-sdk:accessai-compose:0.2.0")
+    implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.0")
 }
 ```
 

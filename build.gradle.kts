@@ -9,6 +9,6 @@ plugins {
 
 allprojects {
     // JitPack rewrites the group to com.github.<user>.<repo>; this is the default for local publishing.
-    group = "com.github.Caculuz-cinks.accessai-android-sdk"
+    group = "com.github.Accessibility-AI.accessai-android-sdk"
     version = providers.gradleProperty("VERSION_NAME").get()
 }

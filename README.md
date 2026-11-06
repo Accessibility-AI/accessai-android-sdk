@@ -1,7 +1,7 @@
 # AccessAI Android SDK
 
-[![CI](https://github.com/Caculuz-cinks/accessai-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Caculuz-cinks/accessai-android-sdk/actions/workflows/ci.yml)
-[![JitPack](https://jitpack.io/v/Caculuz-cinks/accessai-android-sdk.svg)](https://jitpack.io/#Caculuz-cinks/accessai-android-sdk)
+[![CI](https://github.com/Accessibility-AI/accessai-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Accessibility-AI/accessai-android-sdk/actions/workflows/ci.yml)
+[![JitPack](https://jitpack.io/v/Accessibility-AI/accessai-android-sdk.svg)](https://jitpack.io/#Accessibility-AI/accessai-android-sdk)
 
 A voice-first, TalkBack-friendly accessibility layer for Android apps. Developers register the actions their app
 allows (check balance, send money, read transactions); blind and low-vision users can then do those things by
@@ -15,8 +15,8 @@ Part of AccessAI:
 | Repo | What |
 |---|---|
 | **accessai-android-sdk** (this) | Kotlin SDK: action registry, dialog engine, speech, accessible Compose UI |
-| [accessai-server](https://github.com/Caculuz-cinks/accessai-server) | AI service: interpretation, confirmation tokens |
-| [accesspay-demo](https://github.com/Caculuz-cinks/accesspay-demo) | Demo fintech app + mock bank that integrate this SDK |
+| [accessai-server](https://github.com/Accessibility-AI/accessai-server) | AI service: interpretation, confirmation tokens |
+| [accesspay-demo](https://github.com/Accessibility-AI/accesspay-demo) | Demo fintech app + mock bank that integrate this SDK |
 
 ## Modules
 
@@ -32,7 +32,7 @@ Part of AccessAI:
 See [docs/INTEGRATION.md](docs/INTEGRATION.md). The service contract is in [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ```kotlin
-implementation("com.github.Caculuz-cinks.accessai-android-sdk:accessai-compose:0.2.0")
+implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.0")
 ```
 
 ## How a transfer flows
