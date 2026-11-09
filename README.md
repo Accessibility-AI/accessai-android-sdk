@@ -32,7 +32,7 @@ Part of AccessAI:
 See [docs/INTEGRATION.md](docs/INTEGRATION.md). The service contract is in [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ```kotlin
-implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.0")
+implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.1")
 ```
 
 ## How a transfer flows
@@ -64,4 +64,4 @@ Locally you need only JDK 17 to build and test the core, which holds all of the 
 
 ## Status
 
-v0.2.0, hackathon MVP. English only. Simulated funds only. Not a compliance certification.
+v0.2.1, hackathon MVP. English only. Simulated funds only. Not a compliance certification.
