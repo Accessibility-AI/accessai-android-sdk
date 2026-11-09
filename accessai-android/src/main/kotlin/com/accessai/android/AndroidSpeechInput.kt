@@ -36,22 +36,17 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
 
     val isAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(appContext)
 
-    fun start(listener: Listener) = start(listener, attempt = 0)
-
     /**
      * Attempts in order: the configured locale on-device, the configured locale online, then plain English
      * online. Recognizers often have no pack for locales like en-NG and fail with "language not supported"
-     * before hearing anything; any other error is reported as is.
+     * before hearing anything; any other error is reported as is. Retries reuse the same recognizer:
+     * destroying it and creating another straight away loses the new session on a cold speech service.
      */
-    private fun start(listener: Listener, attempt: Int) {
+    fun start(listener: Listener) {
         cancel()
-        val (language, preferOffline) = when (attempt) {
-            0 -> locale.toLanguageTag() to true
-            1 -> locale.toLanguageTag() to false
-            else -> FALLBACK_LANGUAGE to false
-        }
         val r = SpeechRecognizer.createSpeechRecognizer(appContext)
         recognizer = r
+        var attempt = 0
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
@@ -67,9 +62,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             }
             override fun onError(error: Int) {
                 if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
-                    // Posted, not called inline: starting a new recognizer from inside this callback races the
-                    // service teardown ("connection lost, but no #startListening has been invoked yet").
-                    mainHandler.post { if (recognizer === r) start(listener, attempt + 1) }
+                    attempt++
+                    // Posted so the recognizer has finished reporting this error before it listens again.
+                    mainHandler.post { if (recognizer === r) r.startListening(intentFor(attempt)) }
                     return
                 }
                 listener.onError(messageFor(error))
@@ -81,7 +76,16 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             override fun onEndOfSpeech() = Unit
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
         })
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        r.startListening(intentFor(attempt))
+    }
+
+    private fun intentFor(attempt: Int): Intent {
+        val (language, preferOffline) = when (attempt) {
+            0 -> locale.toLanguageTag() to true
+            1 -> locale.toLanguageTag() to false
+            else -> FALLBACK_LANGUAGE to false
+        }
+        return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -89,7 +93,6 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             // Keep voice on the phone where an offline model is installed.
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
         }
-        r.startListening(intent)
     }
 
     /** Stops listening and processes what was heard so far. */
