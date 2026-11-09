@@ -47,24 +47,29 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         val r = SpeechRecognizer.createSpeechRecognizer(appContext)
         recognizer = r
         var attempt = 0
+        // A cancelled recognizer can still deliver a late callback (typically ERROR_CLIENT from cancel()).
+        // Reporting it would announce a stale error over the next session, which the microphone then hears.
+        val current = { recognizer === r }
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+                if (current()) tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
             }
             override fun onPartialResults(partialResults: Bundle?) {
-                partialResults.bestResult()?.let(listener::onPartial)
+                if (current()) partialResults.bestResult()?.let(listener::onPartial)
             }
             override fun onResults(results: Bundle?) {
+                if (!current()) return
                 val text = results.bestResult()
                 if (text.isNullOrBlank()) listener.onError("I didn't catch that. Please try again, or type your request.")
                 else listener.onResult(text)
                 listener.onEnd()
             }
             override fun onError(error: Int) {
+                if (!current()) return
                 if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
                     attempt++
                     // Posted so the recognizer has finished reporting this error before it listens again.
-                    mainHandler.post { if (recognizer === r) r.startListening(intentFor(attempt)) }
+                    mainHandler.post { if (current()) r.startListening(intentFor(attempt)) }
                     return
                 }
                 listener.onError(messageFor(error))
@@ -102,11 +107,11 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
 
     /** Stops listening and discards what was heard. */
     fun cancel() {
-        recognizer?.let {
-            it.cancel()
-            it.destroy()
-        }
+        val r = recognizer ?: return
+        // Cleared first so any callback r still delivers is recognised as stale.
         recognizer = null
+        r.cancel()
+        r.destroy()
     }
 
     private fun Bundle?.bestResult(): String? =
