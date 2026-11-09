@@ -5,6 +5,8 @@ import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -29,6 +31,7 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
 
     private val appContext = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val tone by lazy { runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull() }
 
     val isAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(appContext)
@@ -64,7 +67,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             }
             override fun onError(error: Int) {
                 if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
-                    start(listener, attempt + 1)
+                    // Posted, not called inline: starting a new recognizer from inside this callback races the
+                    // service teardown ("connection lost, but no #startListening has been invoked yet").
+                    mainHandler.post { if (recognizer === r) start(listener, attempt + 1) }
                     return
                 }
                 listener.onError(messageFor(error))
