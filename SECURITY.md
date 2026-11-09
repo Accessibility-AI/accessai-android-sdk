@@ -18,7 +18,7 @@ These are enforced in code, not just documented. Each has tests in
 
 ## Limits to know about
 
-- **Speech recognition happens before the SDK sees the words.** Android's recognizer (usually Google's) may process audio in the cloud when no offline model is installed. The SDK asks for offline recognition and filters the text, but it can't stop a user saying a PIN to the recognizer. The consent screen and the blocked-PIN message both tell users never to say one.
+- **Speech recognition happens before the SDK sees the words.** Android's recognizer (usually Google's) may process audio in the cloud when no offline model is installed. The SDK asks for offline recognition first; when the recognizer has no language pack for the locale (common for en-NG), it retries online, then with plain English. It filters the text, but it can't stop a user saying a PIN to the recognizer. The consent screen and the blocked-PIN message both tell users never to say one.
 - **The key unlock lasts 10 seconds.** The OS lets the key sign for 10 seconds after a successful check rather than once per check, so it works on Android 8–10 with a PIN fallback. Only the SDK uses this key. A per-use key bound to a `CryptoObject` is a possible upgrade for Android 11+.
 - **The server must enforce its side too.** It must require and verify the auth proof for sensitive actions, reject screen descriptors containing account-number patterns, and keep no transcripts. See `docs/API_CONTRACT.md`.
 - **iOS** is not covered. This is an Android SDK.

@@ -33,8 +33,20 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
 
     val isAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(appContext)
 
-    fun start(listener: Listener) {
+    fun start(listener: Listener) = start(listener, attempt = 0)
+
+    /**
+     * Attempts in order: the configured locale on-device, the configured locale online, then plain English
+     * online. Recognizers often have no pack for locales like en-NG and fail with "language not supported"
+     * before hearing anything; any other error is reported as is.
+     */
+    private fun start(listener: Listener, attempt: Int) {
         cancel()
+        val (language, preferOffline) = when (attempt) {
+            0 -> locale.toLanguageTag() to true
+            1 -> locale.toLanguageTag() to false
+            else -> FALLBACK_LANGUAGE to false
+        }
         val r = SpeechRecognizer.createSpeechRecognizer(appContext)
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
@@ -51,6 +63,10 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                 listener.onEnd()
             }
             override fun onError(error: Int) {
+                if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
+                    start(listener, attempt + 1)
+                    return
+                }
                 listener.onError(messageFor(error))
                 listener.onEnd()
             }
@@ -62,11 +78,11 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         })
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             // Keep voice on the phone where an offline model is installed.
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
         }
         r.startListening(intent)
     }
@@ -97,6 +113,16 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             "Microphone permission is off, so I can't listen. You can type your request, or allow the microphone in settings."
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
             "Voice input is busy. Please try again in a moment."
+        in LANGUAGE_ERRORS ->
+            "Voice input isn't available for your language on this phone. You can type your request instead."
         else -> "Voice input isn't working right now. You can type your request instead."
+    }
+
+    private companion object {
+        // SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED and ERROR_LANGUAGE_UNAVAILABLE (API 31+); older
+        // recognizers never send them.
+        val LANGUAGE_ERRORS = setOf(12, 13)
+        const val FALLBACK_LANGUAGE = "en-US"
+        const val LAST_ATTEMPT = 2
     }
 }
