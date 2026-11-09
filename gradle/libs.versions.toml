@@ -9,6 +9,7 @@ activityCompose = "1.9.3"
 lifecycle = "2.8.7"
 coreKtx = "1.15.0"
 biometric = "1.1.0"
+fragment = "1.8.5"
 junit5 = "5.11.3"
 
 [libraries]
@@ -23,6 +24,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "fragment" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }

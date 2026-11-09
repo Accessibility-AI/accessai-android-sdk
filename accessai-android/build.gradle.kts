@@ -32,6 +32,9 @@ dependencies {
     api(project(":accessai-core"))
     // api: hosts show AccessAI from a FragmentActivity, which BiometricPrompt needs.
     api(libs.androidx.biometric)
+    // biometric 1.1.0 pulls in fragment 1.2.5, whose FragmentActivity rejects the request codes that
+    // ActivityResultRegistry generates, crashing the microphone permission request. 1.3.0+ fixes it.
+    api(libs.androidx.fragment)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 }
