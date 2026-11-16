@@ -2,7 +2,10 @@ package com.accessai.android
 
 import android.Manifest
 import android.app.Application
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.speech.RecognizerIntent
 import com.accessai.core.auth.DeviceAuthenticator
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -17,7 +20,10 @@ import com.accessai.core.screen.ScreenDescriptor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -71,7 +77,30 @@ public class AccessAIController internal constructor(
 
     public val speaking: StateFlow<Boolean> get() = speechOut.speaking
 
-    public val isVoiceAvailable: Boolean get() = speechIn.isAvailable
+    /** The phone's own "Speak now" window (RecognizerIntent), used when the in-app recognizer can't be. */
+    public val isSystemVoiceInputAvailable: Boolean
+        get() = context.packageManager.queryIntentActivities(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0).isNotEmpty()
+
+    public val isVoiceAvailable: Boolean get() = speechIn.isAvailable || isSystemVoiceInputAvailable
+
+    private var useSystemVoice = false
+    /** True once the in-app recognizer has proved unusable on this phone; voice then goes through the system window. */
+    public val usesSystemVoiceInput: Boolean get() = useSystemVoice || !speechIn.isAvailable
+
+    private val _systemVoiceRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /**
+     * Emits when the UI should open the system voice window ([systemVoiceIntent]) and pass what comes back to
+     * [onSystemVoiceResult]. AccessAIModeScreen does this.
+     */
+    public val systemVoiceRequests: SharedFlow<Unit> = _systemVoiceRequests.asSharedFlow()
+
+    private val _speechDiagnostics = MutableStateFlow<String?>(null)
+    /** The latest speech-input step, e.g. "Voice try 2/4 (en-NG online): error 2". Codes only. */
+    public val speechDiagnostics: StateFlow<String?> = _speechDiagnostics.asStateFlow()
+
+    init {
+        speechIn.onDiagnostic = { _speechDiagnostics.value = it }
+    }
 
     public val hasMicrophonePermission: Boolean
         get() = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -127,6 +156,12 @@ public class AccessAIController internal constructor(
     // ---- Input ------------------------------------------------------------------------------
 
     public fun startListening() {
+        if (usesSystemVoiceInput && isSystemVoiceInputAvailable) {
+            engine.stopSpeaking()
+            _speechDiagnostics.value = "Voice: using the phone's voice window"
+            _systemVoiceRequests.tryEmit(Unit)
+            return
+        }
         if (!isVoiceAvailable) {
             _listening.value = ListeningState.Unavailable
             engine.say(Announcement.of("Voice input isn't available on this phone. You can type your request instead."))
@@ -148,6 +183,16 @@ public class AccessAIController internal constructor(
             override fun onError(message: String) {
                 engine.say(Announcement.of(message))
             }
+            override fun onUnavailable() {
+                if (isSystemVoiceInputAvailable) {
+                    // Use the phone's own voice window from now on, starting with this request.
+                    useSystemVoice = true
+                    _speechDiagnostics.value = "Voice: switched to the phone's voice window"
+                    _systemVoiceRequests.tryEmit(Unit)
+                } else {
+                    engine.say(Announcement.of("Voice input isn't working on this phone right now. You can type your request instead."))
+                }
+            }
             override fun onNoMatch() {
                 scope.launch { engine.speechNotRecognised() }
             }
@@ -166,6 +211,26 @@ public class AccessAIController internal constructor(
     public fun cancelListening() {
         speechIn.cancel()
         _listening.value = ListeningState.Idle
+    }
+
+    /** The Intent for the system voice window. [prompt] is shown in it, e.g. "Say confirm or cancel". */
+    public fun systemVoiceIntent(prompt: String? = null): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            prompt?.let { putExtra(RecognizerIntent.EXTRA_PROMPT, it) }
+            // No language: the window's default works on phones that have no pack for the configured one.
+        }
+
+    /** What the system voice window returned. Closing it without speaking changes nothing. */
+    public fun onSystemVoiceResult(resultCode: Int, text: String?) {
+        _speechDiagnostics.value = "Voice window: result $resultCode${if (text.isNullOrBlank()) ", no text" else ""}"
+        when {
+            resultCode == Activity.RESULT_OK && !text.isNullOrBlank() -> scope.launch { engine.submit(text, InputSource.VOICE) }
+            resultCode == Activity.RESULT_OK || resultCode == RecognizerIntent.RESULT_NO_MATCH -> scope.launch { engine.speechNotRecognised() }
+            resultCode == Activity.RESULT_CANCELED -> Unit
+            else -> engine.say(Announcement.of("Voice input isn't working on this phone right now. You can type your request instead."))
+        }
     }
 
     public fun submitText(text: String) {

@@ -28,6 +28,8 @@ public data class AccessAIConfig(
     val announceScreenChanges: Boolean = true,
     /** Text-to-speech rate; 1.0 is normal. */
     val speechRate: Float = 0.95f,
+    /** Show speech-input diagnostics (attempt, error codes) under the AccessAI header. For test builds. */
+    val showSpeechDiagnostics: Boolean = false,
     /**
      * Device authentication for SENSITIVE actions. Null (the default) uses [BiometricDeviceAuthenticator]:
      * fingerprint or face with a PIN / pattern / password fallback. Replace it only with an equivalent OS-backed check.

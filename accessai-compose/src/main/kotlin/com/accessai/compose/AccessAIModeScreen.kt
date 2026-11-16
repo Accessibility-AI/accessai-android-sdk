@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -132,6 +133,22 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
         micDenied = !granted
         if (granted) controller.startListening()
     }
+    // The phone's own voice window, for phones whose speech service can't be used from an app.
+    val systemVoice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        controller.onSystemVoiceResult(result.resultCode, result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull())
+    }
+    LaunchedEffect(controller) {
+        controller.systemVoiceRequests.collect {
+            val prompt = when (val s = controller.engine.state.value) {
+                is DialogState.AwaitingConfirmation -> "Say \u201Cconfirm\u201D or \u201Ccancel\u201D"
+                is DialogState.AwaitingInput -> s.question.display
+                else -> "What would you like to do?"
+            }
+            runCatching { systemVoice.launch(controller.systemVoiceIntent(prompt)) }
+        }
+    }
+    val diagnostics by controller.speechDiagnostics.collectAsStateWithLifecycle()
+
     // Back from Settings with the microphone allowed: leave the "Microphone is off" screen.
     LifecycleResumeEffect(Unit) {
         if (controller.hasMicrophonePermission) micDenied = false
@@ -172,6 +189,13 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
         if (awaitingAnswer == null || stopped || typing) return@LaunchedEffect
         if (controller.isScreenReaderActive || !controller.isVoiceAvailable || !controller.hasMicrophonePermission) return@LaunchedEffect
         try {
+            if (controller.usesSystemVoiceInput) {
+                // One voice window per question; it stays open until the user speaks or closes it.
+                withTimeoutOrNull(3_000) { controller.speaking.first { it } }
+                controller.speaking.first { !it }
+                if (controller.engine.state.value == awaitingAnswer) controller.startListening()
+                return@LaunchedEffect
+            }
             repeat(3) {
                 withTimeoutOrNull(3_000) { controller.speaking.first { it } }
                 controller.speaking.first { !it }
@@ -193,7 +217,12 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
     val resting = state is DialogState.Idle || state is DialogState.Outcome
     val partial = (listening as? ListeningState.Listening)?.partial
 
-    PanelScaffold(modifier = modifier, onStop = if (stopped) null else stop, devMode = controller.isDevelopmentBackend) {
+    PanelScaffold(
+        modifier = modifier,
+        onStop = if (stopped) null else stop,
+        devMode = controller.isDevelopmentBackend,
+        diagnostics = diagnostics.takeIf { controller.config.showSpeechDiagnostics },
+    ) {
         val s = state
         when {
             stopped -> ExitScreen(onTurnOnAgain = { stopped = false; controller.resume() }, onClose = close)
@@ -578,6 +607,7 @@ internal fun PanelScaffold(
     modifier: Modifier = Modifier,
     onStop: (() -> Unit)?,
     devMode: Boolean = false,
+    diagnostics: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = AccessAITheme.current
@@ -609,6 +639,14 @@ internal fun PanelScaffold(
             if (devMode) {
                 Text(
                     "Development mode: no AccessAI server. Simulated use only.",
+                    style = t.caption.copy(fontWeight = FontWeight.Normal),
+                    color = t.mutedText,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            diagnostics?.let {
+                Text(
+                    it,
                     style = t.caption.copy(fontWeight = FontWeight.Normal),
                     color = t.mutedText,
                     modifier = Modifier.padding(top = 4.dp),
