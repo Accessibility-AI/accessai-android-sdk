@@ -87,6 +87,8 @@ public data class ConfirmationDetails(
     val recipient: String? = null,
     val recipientDetail: String? = null,
     val note: String? = null,
+    /** Heading for the confirmation screen, e.g. "Confirm payment". */
+    val title: String? = null,
 )
 
 public enum class InputKind {

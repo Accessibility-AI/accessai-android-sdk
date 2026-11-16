@@ -84,19 +84,39 @@ public class AccessAIController internal constructor(
     public fun enable(greeting: Announcement? = null) {
         prefs.edit().putBoolean(KEY_ENABLED, true).apply()
         _enabled.value = true
-        val intro = Announcement.of("AccessAI accessibility mode is on. Tap Speak, or type, and tell me what you'd like to do. Say help to hear your options.")
+        val intro = Announcement.of("AccessAI is on. Tap the microphone, or type, and tell me what you'd like to do. Say help to hear your options.")
         engine.say(greeting?.let { it + intro } ?: intro)
     }
 
-    public fun disable() {
+    /** Turns accessibility mode off. [announce] = false when the user has already heard "AccessAI is off". */
+    public fun disable(announce: Boolean = true) {
         speechIn.cancel()
         _listening.value = ListeningState.Idle
         prefs.edit().putBoolean(KEY_ENABLED, false).apply()
         _enabled.value = false
         scope.launch {
             engine.reset()
-            engine.say(Announcement.of("AccessAI accessibility mode is off."))
+            if (announce) engine.say(Announcement.of("AccessAI accessibility mode is off."))
         }
+    }
+
+    /**
+     * The Stop button: releases the microphone at once and discards the session (pending confirmation,
+     * transcript, last response) but leaves the mode on, so the "AccessAI is off" screen can offer
+     * "Turn on again" or "Close".
+     */
+    public fun stop() {
+        speechIn.cancel()
+        _listening.value = ListeningState.Idle
+        scope.launch {
+            engine.reset()
+            engine.say(Announcement.of("AccessAI is off. Listening has ended."))
+        }
+    }
+
+    /** Says hello again after [stop], without changing the stored mode. */
+    public fun resume() {
+        engine.say(Announcement.of("AccessAI is on. Tap the microphone, or type, and tell me what you'd like to do."))
     }
 
     public fun acceptConsent() {

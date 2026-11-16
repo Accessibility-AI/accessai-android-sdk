@@ -30,6 +30,7 @@ public object AccessAIIcons {
         )
     }
     public val Help: ImageVector by lazy { icon("Help", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 17h.01") }
+    public val Shield: ImageVector by lazy { icon("Shield", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z") }
     public val Cloud: ImageVector by lazy { icon("Cloud", "M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z") }
     public val Trash: ImageVector by lazy { icon("Trash", "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13") }
     public val Power: ImageVector by lazy { icon("Power", "M12 3v9M6.3 6.8a8 8 0 1 0 11.4 0") }

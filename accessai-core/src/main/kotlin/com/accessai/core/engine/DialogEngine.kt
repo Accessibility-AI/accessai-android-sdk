@@ -742,7 +742,7 @@ public class DialogEngine(
 
     private fun notCaught(): String {
         val examples = registry.all().mapNotNull { it.examples.firstOrNull() }.take(2)
-        val tryThis = if (examples.isEmpty()) "Say help to hear what I can do." else "Try: " + examples.joinToString(" or ") { "\"$it\"" } + "."
+        val tryThis = if (examples.isEmpty()) "Say help to hear what I can do." else "Try: " + examples.joinToString(" or ") { "“$it”" } + "."
         return "I didn't catch that. $tryThis"
     }
 

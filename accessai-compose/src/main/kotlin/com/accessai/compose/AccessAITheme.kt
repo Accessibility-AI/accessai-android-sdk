@@ -102,8 +102,12 @@ public class ResolvedAccessAITheme internal constructor(
     internal val inlineIconSize: Dp get() = if (largeText) 36.dp else 24.dp
 }
 
-internal val LocalAccessAI = staticCompositionLocalOf<ResolvedAccessAITheme> {
-    error("AccessAI components must be inside AccessAITheme { }")
+internal val LocalAccessAI = staticCompositionLocalOf<ResolvedAccessAITheme?> { null }
+
+/** AccessAI's own screens work without a host theme: they apply the default [AccessAITheme] when none is set. */
+@Composable
+internal fun EnsureAccessAITheme(content: @Composable () -> Unit) {
+    if (LocalAccessAI.current != null) content() else AccessAITheme(content = content)
 }
 
 /**
@@ -163,7 +167,7 @@ public fun AccessAITheme(
 public object AccessAITheme {
     /** The resolved roles and type for the enclosing [AccessAITheme]. */
     public val current: ResolvedAccessAITheme
-        @Composable get() = LocalAccessAI.current
+        @Composable get() = checkNotNull(LocalAccessAI.current) { "AccessAI components must be inside AccessAITheme { }" }
 }
 
 /** Dark mode or Android's "High contrast text": AccessAI then uses its black, 7:1 palette. */

@@ -66,7 +66,7 @@ class OutcomeTest {
         h.engine.speechNotRecognised()
         assertEquals(OutcomeKind.NOT_UNDERSTOOD, h.engine.outcome().kind)
         assertEquals(3, h.engine.outcome().misses)
-        assertContains(h.speech.last, "I didn't catch that. Try: \"what is my balance\"")
+        assertContains(h.speech.last, "I didn't catch that. Try: “what is my balance”")
     }
 
     @Test
