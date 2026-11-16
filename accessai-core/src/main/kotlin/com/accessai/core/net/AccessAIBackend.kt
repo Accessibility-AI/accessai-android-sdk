@@ -24,6 +24,8 @@ public class BackendException(
     public val code: String,
     message: String,
     cause: Throwable? = null,
+    /** For [RATE_LIMITED]: seconds from the `Retry-After` header, when the service gave one. */
+    public val retryAfterSeconds: Long? = null,
 ) : Exception(message, cause) {
     public val isConnectivity: Boolean get() = code == NETWORK || code == TIMEOUT
 
@@ -32,6 +34,10 @@ public class BackendException(
         public const val TIMEOUT: String = "timeout"
         public const val SERVER: String = "server"
         public const val BAD_RESPONSE: String = "bad_response"
+        public const val BAD_REQUEST: String = "bad_request"
+        public const val NOT_FOUND: String = "not_found"
+        /** The language model is rate limited (429). The SDK never retries on its own; the user can try again. */
+        public const val RATE_LIMITED: String = "rate_limited"
         public const val SESSION_EXPIRED: String = "session_expired"
         public const val NOT_A_CONFIRMATION: String = "not_a_confirmation"
         public const val CONFIRMATION_EXPIRED: String = "confirmation_expired"

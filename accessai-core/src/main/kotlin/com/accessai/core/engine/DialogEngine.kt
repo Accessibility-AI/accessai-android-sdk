@@ -359,8 +359,16 @@ public class DialogEngine(
     private suspend fun beginConfirmation(d: Draft, params: ResolvedParams) {
         val spec = d.spec
         val localHash = Canonical.sha256(params.values)
+        suspend fun create() = backend.createConfirmation(CreateConfirmationRequest(ensureSession(), spec.id, Canonical.jsonObject(params.values)))
         val ticket = try {
-            backend.createConfirmation(CreateConfirmationRequest(ensureSession(), spec.id, Canonical.jsonObject(params.values)))
+            try {
+                create()
+            } catch (e: BackendException) {
+                // Nothing is pending yet, so a fresh session (sessions last 24 hours) and one more try is safe.
+                if (e.code != BackendException.SESSION_EXPIRED) throw e
+                sessionId = null
+                create()
+            }
         } catch (e: BackendException) {
             _state.value = DialogState.Idle
             say(connectivityMessage(e, "prepare that for confirmation").plus(Announcement.of("Nothing was sent.")))
@@ -457,7 +465,7 @@ public class DialogEngine(
         // Device authentication: the OS checks it's the account holder before any token can exist.
         var proof: AuthProof? = null
         if (p.spec.requiresDeviceAuth) {
-            val authenticator = checkNotNull(registry.deviceAuthenticator) { "SENSITIVE action registered without authenticator" }
+            val authenticator = checkNotNull(registry.deviceAuthenticator) { "Confirmed action registered without authenticator" }
             _state.value = DialogState.AwaitingAuthentication(p.spec.id)
             say(Announcement.of("To confirm it's you, use your fingerprint, face, or screen lock now."))
             val challenge = AuthChallenge(session, p.pendingId, p.spec.id, p.paramsSha256, p.spec.summary!!(p.params))
@@ -499,6 +507,12 @@ public class DialogEngine(
             backend.confirm(p.pendingId, ConfirmRequest(session, method, utterance, proof))
         } catch (e: BackendException) {
             when (e.code) {
+                BackendException.SESSION_EXPIRED -> {
+                    // The pending confirmation belonged to the expired session, so it can't be confirmed any more.
+                    sessionId = null
+                    _state.value = DialogState.Idle
+                    say(Announcement.of("Your AccessAI session ended, so nothing was sent. Please make the request again."))
+                }
                 BackendException.AUTH_INVALID -> {
                     // E.g. new fingerprint enrolled: the device key changed. Re-register it on the next session.
                     sessionId = null
@@ -683,8 +697,11 @@ public class DialogEngine(
     }
 
     private fun connectivityMessage(e: BackendException, doing: String): Announcement = Announcement.of(
-        if (e.isConnectivity) "I couldn't connect to AccessAI to $doing. Please check your internet connection. You can still type, or say repeat or cancel."
-        else "Sorry, something went wrong while trying to $doing.",
+        when {
+            e.isConnectivity -> "I couldn't connect to AccessAI to $doing. Please check your internet connection. You can still type, or say repeat or cancel."
+            e.code == BackendException.RATE_LIMITED -> "AccessAI is busy right now, so I couldn't $doing. Please try again in a moment."
+            else -> "Sorry, something went wrong while trying to $doing."
+        },
     )
 
     private fun addTranscript(speaker: Speaker, text: String) {

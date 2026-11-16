@@ -77,8 +77,11 @@ public class ActionSpec internal constructor(
 ) {
     public fun param(name: String): ParamSpec? = params.firstOrNull { it.name == name }
 
-    /** Sensitive actions need OS biometric or device-credential authentication before a token is requested. */
-    public val requiresDeviceAuth: Boolean get() = sensitivity == Sensitivity.SENSITIVE
+    /**
+     * Every confirmed action needs OS biometric or device-credential authentication before a token is requested:
+     * contract v1.1 makes the service require a device signature on every confirmation, whatever the sensitivity.
+     */
+    public val requiresDeviceAuth: Boolean get() = requiresConfirmation
 }
 
 /**

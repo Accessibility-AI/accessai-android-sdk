@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-// Wire models for the AccessAI service, contract v1. See docs/API_CONTRACT.md.
+// Wire models for the AccessAI service, contract v1.1. See docs/API_CONTRACT.md.
 // Every change here must be mirrored in accessai-server/contracts/v1.
 
 @Serializable

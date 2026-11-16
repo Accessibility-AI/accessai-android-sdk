@@ -46,6 +46,18 @@ class SecurityTest {
     }
 
     @Test
+    fun `any confirmed action needs device auth, because the service signs no confirmation without it`() {
+        val spec = action("close_savings_goal") {
+            sensitivity = Sensitivity.NAVIGATE
+            requiresConfirmation = true
+            summary { Announcement.of("close your savings goal") }
+            handler { ActionResult.Success(Announcement.of("ok")) }
+        }
+        assertTrue(spec.requiresDeviceAuth)
+        assertFailsWith<IllegalArgumentException> { ActionRegistry(deviceAuthenticator = null).register(spec) }
+    }
+
+    @Test
     fun `an action that takes an amount must be sensitive`() {
         assertFailsWith<IllegalArgumentException> {
             action("pay_bill") {

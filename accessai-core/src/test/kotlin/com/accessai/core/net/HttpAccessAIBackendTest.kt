@@ -53,6 +53,17 @@ class HttpAccessAIBackendTest {
     }
 
     @Test
+    fun `rate limiting keeps Retry-After`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(429).setHeader("Retry-After", "7")
+                .setBody("""{"error":{"code":"rate_limited","message":"slow down"}}"""),
+        )
+        val e = assertFailsWith<BackendException> { backend.interpret(InterpretRequest("s1", "hi", "en-NG", actions = emptyList())) }
+        assertEquals(BackendException.RATE_LIMITED, e.code)
+        assertEquals(7L, e.retryAfterSeconds)
+    }
+
+    @Test
     fun `server errors without a body are reported as server errors`() = runTest {
         server.enqueue(MockResponse().setResponseCode(503))
         val e = assertFailsWith<BackendException> { backend.interpret(InterpretRequest("s1", "hi", "en-NG", actions = emptyList())) }
