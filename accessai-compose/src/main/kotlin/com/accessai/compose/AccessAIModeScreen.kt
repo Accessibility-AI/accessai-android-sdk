@@ -165,6 +165,28 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
         if (controller.engine.state.value is DialogState.Idle && controller.listening.value == ListeningState.Idle && !stopped && !typing) listen()
     }
 
+    // Screens that ask for an answer (confirm, which one, a missing detail) listen for it once AccessAI has finished
+    // speaking, so the microphone never hears AccessAI. Up to three tries while the same question is on screen.
+    val awaitingAnswer: DialogState? = state.takeIf { it is DialogState.AwaitingConfirmation || it is DialogState.AwaitingInput }
+    LaunchedEffect(awaitingAnswer, stopped, typing) {
+        if (awaitingAnswer == null || stopped || typing) return@LaunchedEffect
+        if (controller.isScreenReaderActive || !controller.isVoiceAvailable || !controller.hasMicrophonePermission) return@LaunchedEffect
+        try {
+            repeat(3) {
+                withTimeoutOrNull(3_000) { controller.speaking.first { it } }
+                controller.speaking.first { !it }
+                delay(250)
+                if (controller.engine.state.value != awaitingAnswer || controller.listening.value != ListeningState.Idle) return@LaunchedEffect
+                controller.startListening()
+                controller.listening.first { it !is ListeningState.Listening }
+                if (controller.engine.state.value != awaitingAnswer) return@LaunchedEffect
+            }
+        } finally {
+            // Left the question (a button was tapped, or Stop): release the microphone.
+            if (controller.engine.state.value != awaitingAnswer && controller.listening.value is ListeningState.Listening) controller.cancelListening()
+        }
+    }
+
     BackHandler { if (stopped) close() else stop() }
 
     val lastAsked = transcript.lastOrNull { it.speaker == Speaker.USER }?.text
@@ -175,6 +197,9 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
         val s = state
         when {
             stopped -> ExitScreen(onTurnOnAgain = { stopped = false; controller.resume() }, onClose = close)
+            // These keep their content on screen while listening for the answer.
+            s is DialogState.AwaitingConfirmation -> ConfirmScreen(s, controller, partial)
+            s is DialogState.AwaitingInput && s.kind == InputKind.DISAMBIGUATION && !typing -> ClarifyScreen(s, controller, partial)
             partial != null -> ListeningScreen(
                 partial = partial,
                 question = (s as? DialogState.AwaitingInput)?.question?.display,
@@ -194,13 +219,11 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
                 note = "Use your fingerprint, face or screen lock. Nothing is sent until your phone checks it's you.",
                 onCancel = null,
             )
-            s is DialogState.AwaitingConfirmation -> ConfirmScreen(s, controller)
             typing && (resting || s is DialogState.AwaitingInput) -> TypingScreen(
                 heading = (s as? DialogState.AwaitingInput)?.question?.display ?: "Type your request",
                 onSend = { controller.submitText(it); typing = false },
                 onUseVoice = listen,
             )
-            s is DialogState.AwaitingInput && s.kind == InputKind.DISAMBIGUATION -> ClarifyScreen(s, controller)
             s is DialogState.AwaitingInput -> QuestionScreen(
                 question = s.question.display,
                 voiceOff = micDenied || !controller.isVoiceAvailable,
@@ -310,7 +333,7 @@ private fun ColumnScope.QuestionScreen(question: String, voiceOff: Boolean, onLi
 }
 
 @Composable
-private fun ColumnScope.ClarifyScreen(s: DialogState.AwaitingInput, controller: AccessAIController) {
+private fun ColumnScope.ClarifyScreen(s: DialogState.AwaitingInput, controller: AccessAIController, listening: String?) {
     val words = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
     val sayable = s.choices.indices.take(words.size).map { "“${words[it]}”" }
     Screen(
@@ -323,6 +346,7 @@ private fun ColumnScope.ClarifyScreen(s: DialogState.AwaitingInput, controller: 
             Action("None of these", AccessAIIcons.Close, ActionVariant.TERTIARY, onClick = controller::cancel),
         ),
     ) {
+        listening?.let { ListeningStrip(it, "Say ${sayable.joinToString(" or ")}.") }
         Column(verticalArrangement = Arrangement.spacedBy(AccessAISpace.button)) {
             s.choices.forEachIndexed { i, choice ->
                 OptionRow(number = i + 1, word = words.getOrElse(i) { "${i + 1}" }, label = choice, onClick = { controller.choose(i) })
@@ -333,20 +357,28 @@ private fun ColumnScope.ClarifyScreen(s: DialogState.AwaitingInput, controller: 
 }
 
 @Composable
-private fun ColumnScope.ConfirmScreen(s: DialogState.AwaitingConfirmation, controller: AccessAIController) {
+private fun ColumnScope.ConfirmScreen(s: DialogState.AwaitingConfirmation, controller: AccessAIController, listening: String?) {
     val totalSeconds = 30
-    val start = remember(s) { System.currentTimeMillis() }
-    var now by remember(s) { mutableLongStateOf(start) }
+    val shown = remember(s) { System.currentTimeMillis() }
+    // The 30 seconds start once AccessAI has finished reading the payment back, so the user gets all of them.
+    var start by remember(s) { mutableStateOf<Long?>(null) }
+    var now by remember(s) { mutableLongStateOf(shown) }
     LaunchedEffect(s) {
+        withTimeoutOrNull(3_000) { controller.speaking.first { it } }
+        withTimeoutOrNull(25_000) { controller.speaking.first { !it } }
+        val begun = System.currentTimeMillis()
+        start = begun
+        now = begun
         while (true) {
-            delay(1_000 - (now - start) % 1_000)
+            delay(1_000 - (now - begun) % 1_000)
             now = System.currentTimeMillis()
         }
     }
-    // 30 seconds, or less if the service's confirmation expires sooner. A skewed phone clock is ignored.
-    val serverLeft = s.expiresAt.toEpochMilli() - start
-    val deadline = start + if (serverLeft > 5_000) minOf(totalSeconds * 1_000L, serverLeft - 2_000) else totalSeconds * 1_000L
-    val secondsLeft = ceil((deadline - now) / 1_000.0).toInt().coerceAtLeast(0)
+    // Never past the service's own expiry (60 s from when it was created). A skewed phone clock is ignored.
+    val serverLeft = s.expiresAt.toEpochMilli() - shown
+    val serverDeadline = if (serverLeft > 5_000) shown + serverLeft - 2_000 else Long.MAX_VALUE
+    val deadline = start?.let { minOf(it + totalSeconds * 1_000L, serverDeadline) }
+    val secondsLeft = deadline?.let { ceil((it - now) / 1_000.0).toInt().coerceIn(0, totalSeconds) } ?: totalSeconds
     LaunchedEffect(s, secondsLeft == 0) {
         if (secondsLeft == 0) controller.cancel() // Says "Cancelled. Nothing was sent."
     }
@@ -364,6 +396,7 @@ private fun ColumnScope.ConfirmScreen(s: DialogState.AwaitingConfirmation, contr
             Action("Cancel", AccessAIIcons.Close, ActionVariant.SECONDARY, tall = true, description = "Cancel. Do not send.", onClick = controller::cancel),
         ),
     ) {
+        listening?.let { ListeningStrip(it, "Say \u201Cconfirm\u201D or \u201Ccancel\u201D.") }
         ConfirmationCard(summary = "$summary.", details = s.details, secondsLeft = secondsLeft, totalSeconds = totalSeconds)
     }
 }
@@ -716,6 +749,33 @@ private fun Mic(state: MicState, label: String, caption: String, onClick: () -> 
         MicButton(state, onClick)
         Text(label, style = t.title, color = t.onSurface, textAlign = TextAlign.Center)
         Text(caption, style = t.caption.copy(fontWeight = FontWeight.Normal), color = t.mutedText, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * Shown inside a screen that is listening for its answer, instead of switching to the Listening screen.
+ * The microphone tone and the words carry the state; partial words stay silent to TalkBack.
+ */
+@Composable
+private fun ListeningStrip(partial: String, prompt: String) {
+    val t = AccessAITheme.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(t.cardRadius))
+            .border(t.stroke, t.primary, RoundedCornerShape(t.cardRadius))
+            .clearAndSetSemantics { contentDescription = "Listening. $prompt" }
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(t.iconSize).clip(CircleShape).background(t.primary), contentAlignment = Alignment.Center) {
+            Icon(AccessAIIcons.Mic, contentDescription = null, tint = t.onPrimary, modifier = Modifier.size(t.iconSize * 0.64f))
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Listening", style = t.label, color = t.onSurface)
+            Text(partial.ifBlank { prompt }, style = t.body, color = t.mutedText)
+        }
     }
 }
 

@@ -92,6 +92,18 @@ class OutcomeTest {
     }
 
     @Test
+    fun `not caught during a confirmation keeps it and asks for confirm or cancel`() = runTest {
+        val h = Harness()
+        h.engine.submit("Send 5000 to Amaka")
+        val before = assertIs<DialogState.AwaitingConfirmation>(h.engine.state.value)
+        h.engine.speechNotRecognised()
+        assertEquals(before, h.engine.state.value)
+        assertContains(h.speech.last, "confirm” or “cancel")
+        h.engine.submit("confirm")
+        assertEquals(OutcomeKind.SUCCESS, h.engine.outcome().kind)
+    }
+
+    @Test
     fun `cancelling a confirmation is shown as cancelled`() = runTest {
         val h = Harness()
         h.engine.submit("Send 5000 to Amaka")

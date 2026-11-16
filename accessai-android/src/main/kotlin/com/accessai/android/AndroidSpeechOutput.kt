@@ -27,7 +27,8 @@ internal class AndroidSpeechOutput(
 
     private val appContext = context.applicationContext
     private val accessibility = appContext.getSystemService(AccessibilityManager::class.java)
-    private val queued = mutableListOf<Announcement>()
+    /** Said before the engine was ready, with the utterance id already counted as speaking. */
+    private val queued = mutableListOf<Pair<Announcement, String>>()
     private var ready = false
     private val active = mutableSetOf<String>()
 
@@ -39,7 +40,9 @@ internal class AndroidSpeechOutput(
             ready = status == TextToSpeech.SUCCESS
             if (ready) {
                 configureVoice()
-                queued.forEach { speakWithTts(it) }
+                queued.forEach { (announcement, id) -> speakWithTts(announcement, id) }
+            } else {
+                update { active.clear() }
             }
             queued.clear()
         }
@@ -64,8 +67,12 @@ internal class AndroidSpeechOutput(
             announceToScreenReader(announcement.spoken)
             return
         }
+        // Counted as speaking from now, not from when audio starts: a long utterance can take seconds to
+        // synthesise, and nothing may listen or start a countdown in that gap.
+        val id = UUID.randomUUID().toString()
+        update { active += id }
         synchronized(queued) {
-            if (ready) speakWithTts(announcement) else queued += announcement
+            if (ready) speakWithTts(announcement, id) else queued += announcement to id
         }
     }
 
@@ -80,8 +87,10 @@ internal class AndroidSpeechOutput(
         tts.shutdown()
     }
 
-    private fun speakWithTts(announcement: Announcement) {
-        tts.speak(announcement.spoken, TextToSpeech.QUEUE_ADD, null, UUID.randomUUID().toString())
+    private fun speakWithTts(announcement: Announcement, id: String) {
+        if (tts.speak(announcement.spoken, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) {
+            update { active -= id }
+        }
     }
 
     private fun configureVoice() {

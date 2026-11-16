@@ -144,7 +144,14 @@ public class DialogEngine(
     }
 
     /** The speech recogniser heard nothing it could use. Shown like any other request that wasn't understood. */
-    public suspend fun speechNotRecognised(): Unit = mutex.withLock { notUnderstood(notCaught()) }
+    public suspend fun speechNotRecognised(): Unit = mutex.withLock {
+        when (val s = _state.value) {
+            // Waiting for an answer: keep waiting, and say briefly what answer is needed.
+            is DialogState.AwaitingConfirmation -> say(Announcement.of("I didn't catch that. Say “confirm” or “cancel”, or tap a button."))
+            is DialogState.AwaitingInput -> say(Announcement.of("I didn't catch that. ${s.question.display}"))
+            else -> notUnderstood(notCaught())
+        }
+    }
 
     public fun repeat() {
         _lastAnnouncement.value?.let { speech.speak(it) }
