@@ -42,9 +42,10 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
     val isAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(appContext)
 
     /**
-     * Attempts in order: the configured locale on-device, the configured locale online, then plain English
-     * online. Recognizers often have no pack for locales like en-NG and fail with "language not supported"
-     * before hearing anything; any other error is reported as is. Retries reuse the same recognizer:
+     * Attempts in order: the configured locale on-device, the configured locale online, plain English online,
+     * then plain English on-device. Recognizers often have no pack for locales like en-NG: some say "language
+     * not supported", others report a network or server error before hearing anything, so either moves on to
+     * the next attempt as long as the user hasn't started speaking. Other errors are reported as is. Retries reuse the same recognizer:
      * destroying it and creating another straight away loses the new session on a cold speech service
      * (ERROR_SERVER_DISCONNECTED). So each recognizer is released as soon as its session ends, and a session the
      * service drops before the microphone opens is retried once, quietly, with a fresh recognizer.
@@ -60,6 +61,7 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         val generation = ++sessions
         var attempt = 0
         var ready = false
+        var heard = false
         // A cancelled recognizer can still deliver a late callback (typically ERROR_CLIENT from cancel()).
         // Reporting it would announce a stale error over the next session, which the microphone then hears.
         val current = { recognizer === r }
@@ -89,7 +91,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                     mainHandler.postDelayed({ if (sessions == generation && recognizer == null) start(listener, reconnect = false) }, RECONNECT_DELAY_MS)
                     return
                 }
-                if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
+                // Error codes only, never anything the user said.
+                Log.i(TAG, "Speech error $error on attempt $attempt${if (heard) " after speech began" else ""}")
+                if ((error in LANGUAGE_ERRORS || (error in SERVICE_ERRORS && !heard)) && attempt < LAST_ATTEMPT) {
                     attempt++
                     // Posted so the recognizer has finished reporting this error before it listens again.
                     mainHandler.post { if (current()) r.startListening(intentFor(attempt)) }
@@ -100,7 +104,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                 listener.onEnd()
                 release(r)
             }
-            override fun onBeginningOfSpeech() = Unit
+            override fun onBeginningOfSpeech() {
+                if (current()) heard = true
+            }
             override fun onRmsChanged(rmsdB: Float) = Unit
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() = Unit
@@ -113,7 +119,8 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         val (language, preferOffline) = when (attempt) {
             0 -> locale.toLanguageTag() to true
             1 -> locale.toLanguageTag() to false
-            else -> FALLBACK_LANGUAGE to false
+            2 -> FALLBACK_LANGUAGE to false
+            else -> FALLBACK_LANGUAGE to true
         }
         return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -157,7 +164,7 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
             "I didn't catch that. Please try again, or type your request."
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
-            "Voice input needs an internet connection right now. You can type your request instead."
+            "Voice input isn't working on this phone right now. You can type your request instead, or check that voice typing is turned on in your phone's settings."
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
             "Microphone permission is off, so I can't listen. You can type your request, or allow the microphone in settings."
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
@@ -172,7 +179,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         // recognizers never send them.
         val LANGUAGE_ERRORS = setOf(12, 13)
         const val FALLBACK_LANGUAGE = "en-US"
-        const val LAST_ATTEMPT = 2
+        const val LAST_ATTEMPT = 3
+        // Reported by some recognizers for a language they can't handle, before hearing anything.
+        val SERVICE_ERRORS = setOf(SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER)
         const val TAG = "AccessAI"
         const val RECONNECT_DELAY_MS = 300L
         // ERROR_CLIENT, and ERROR_SERVER_DISCONNECTED (API 31+): the session was lost, not the user's speech.
