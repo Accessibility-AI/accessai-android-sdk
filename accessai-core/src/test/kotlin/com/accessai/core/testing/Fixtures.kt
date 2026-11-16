@@ -31,7 +31,8 @@ import java.util.Base64
 class RecordingSpeech : SpeechOutput {
     val spoken = mutableListOf<String>()
     var stops = 0
-    override fun speak(announcement: Announcement) { spoken += announcement.spoken }
+    var lastAnnouncement: Announcement? = null
+    override fun speak(announcement: Announcement) { spoken += announcement.spoken; lastAnnouncement = announcement }
     override fun stop() { stops++ }
     val last: String get() = spoken.last()
     fun all(): String = spoken.joinToString(" | ")
@@ -135,7 +136,7 @@ fun registryFor(bank: FakeBank, auth: DeviceAuthenticator? = FakeAuthenticator()
             if (bank.transferDelayMillis > 0) delay(bank.transferDelayMillis)
             if (bank.failNextTransfer) {
                 bank.failNextTransfer = false
-                return@handler ActionResult.Failure(Announcement.of("The transfer failed. No money was sent."))
+                return@handler ActionResult.Failure(Announcement.of("The transfer failed. No money was sent."), title = "Payment not sent", detail = "Your balance is still ₦84,250.")
             }
             bank.transfers += ctx
             bank.balanceKobo -= ctx.params.number("amount_minor")

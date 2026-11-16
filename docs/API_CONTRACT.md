@@ -7,6 +7,11 @@ This is the contract between the SDK (`accessai-core`, package `com.accessai.cor
 `auth_invalid` error, `amr` token claim) and data-handling rules (see [Privacy](#privacy-and-retention)). All new
 request fields are additive.
 
+**Service rules the SDK follows (matches `accessai-server-gemini` contracts/v1, OpenAPI 1.1.0):** every confirmation
+needs the device signature, whatever the action's sensitivity, so the SDK runs device authentication for every
+action that requires confirmation. Sessions last 24 hours. Interactive docs for the demo server:
+`https://accessai-server-gemini.fly.dev/docs`.
+
 - Base URL: configured by the host app (`AccessAIConfig.serverUrl`). HTTPS only in production.
 - All bodies are JSON, `snake_case`. Unknown fields must be ignored by both sides.
 - Every request carries `X-AccessAI-App: <app_id>` (public identifier, not a secret) and `X-Request-Id: <uuid>`.
@@ -22,15 +27,15 @@ Any non-2xx response should have this body:
 
 | code | HTTP | When |
 |---|---|---|
-| `bad_request` | 400 | Schema validation failed |
-| `session_expired` | 401 | Unknown or expired `session_id` (the SDK creates a new session and retries `/interpret` once) |
+| `bad_request` | 400 | Schema validation failed, a required field is missing, or the utterance contains a 10+ digit run (the SDK redacts these first) |
+| `session_expired` | 401 | Unknown or expired `session_id`. The SDK creates a new session and retries `/interpret` or `POST /v1/confirmations` once; at `/confirm` it stops and asks the user to make the request again |
 | `not_found` | 404 | Unknown `pending_id`, or it belongs to another session |
 | `not_a_confirmation` | 422 | `/confirm` with `method: "voice"` whose utterance is not an exact confirmation |
 | `confirmation_expired` | 410 | `/confirm` after `expires_at` |
 | `confirmation_used` | 409 | `/confirm` on a pending confirmation that was already confirmed or cancelled |
-| `auth_invalid` | 401 | `/confirm` for a sensitive action without a valid device-auth proof (see below) |
-| `rate_limited` | 429 | |
-| `server` | 5xx | |
+| `auth_invalid` | 401 | `/confirm` without a valid device-auth proof (see below) |
+| `rate_limited` | 429 | `/interpret` when the language model is rate limited. `Retry-After` gives seconds when known (`BackendException.retryAfterSeconds`). The SDK never retries; it tells the user to try again shortly |
+| `server` | 5xx | Model or server failure. The message is generic |
 
 ## POST /v1/sessions
 
@@ -147,7 +152,7 @@ The SDK refuses to continue if the server's hash differs from its own. Suggested
   "session_id": "s_…",
   "method": "voice",                              // or "touch" (no utterance)
   "utterance": "confirm transfer",
-  "auth": {                                       // required for sensitive actions
+  "auth": {                                       // required for every confirmation
     "method": "biometric",                        // or "device_credential" (PIN / pattern / password)
     "kid": "3f9a0c1d22e4b6a7",
     "alg": "ES256",
@@ -158,11 +163,11 @@ The SDK refuses to continue if the server's hash differs from its own. Suggested
 { "status": "confirmed", "token": "<compact JWS>", "nonce": "8b0e…", "expires_at": "2026-10-29T12:01:00Z" }
 ```
 
-### Device authentication (sensitive actions)
+### Device authentication (every confirmation)
 
 The SDK only calls `/confirm` after the phone's own lock screen (fingerprint or face, falling back to PIN, pattern
 or password) succeeded. It proves this with a signature from a Keystore key the OS unlocks only after that check.
-Before minting a token for a sensitive action, the service must:
+Before minting any token, the service must (a client-sent `sensitivity` can't lower this):
 
 1. require `auth`, with `auth.kid` equal to the session's `device_key.kid`;
 2. rebuild the signed payload exactly (UTF-8):
@@ -191,7 +196,8 @@ never receives a PIN, password or biometric; reject any request that seems to co
 
 ## POST /v1/confirmations/{pending_id}/cancel
 
-`{ "session_id": "s_…" }` → `204`. Idempotent.
+`{ "session_id": "s_…" }` → `204`. Idempotent: cancelling twice returns `204`. Cancelling one that was already
+confirmed returns `confirmation_used`.
 
 ## GET /.well-known/jwks.json
 

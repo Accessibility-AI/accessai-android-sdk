@@ -8,8 +8,8 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * The allowlist. AccessAI can only ever invoke actions registered here.
  *
- * [deviceAuthenticator] is required before any SENSITIVE action can be registered: no money moves without
- * OS biometric or device-credential authentication.
+ * [deviceAuthenticator] is required before any action that needs confirmation (every SENSITIVE action, and any
+ * other that opts in) can be registered: nothing is confirmed without OS biometric or device-credential authentication.
  */
 public class ActionRegistry(public val deviceAuthenticator: DeviceAuthenticator? = null) {
     private val actions = ConcurrentHashMap<String, ActionSpec>()
@@ -19,7 +19,7 @@ public class ActionRegistry(public val deviceAuthenticator: DeviceAuthenticator?
         synchronized(order) {
             require(spec.id !in RESERVED) { "'${spec.id}' is reserved for AccessAI's built-in commands" }
             require(!spec.requiresDeviceAuth || deviceAuthenticator != null) {
-                "Action '${spec.id}' is SENSITIVE, so it needs a DeviceAuthenticator. Create the registry with one " +
+                "Action '${spec.id}' needs confirmation, so it needs a DeviceAuthenticator. Create the registry with one " +
                     "(on Android, AccessAI provides it automatically)."
             }
             if (actions.put(spec.id, spec) == null) order += spec.id

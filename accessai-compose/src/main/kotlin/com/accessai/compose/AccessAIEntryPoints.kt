@@ -1,23 +1,28 @@
 package com.accessai.compose
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.accessai.android.AccessAI
 import com.accessai.android.AccessAIController
@@ -35,7 +40,7 @@ public fun AccessAIScreen(descriptor: ScreenDescriptor, controller: AccessAICont
     }
 }
 
-/** The prominent entry point (PRD §6.1). Large, labelled, and the first thing TalkBack users can find. */
+/** A plain entry button for hosts that don't use [AccessAIEntryPanel]. Large, labelled and easy to find. */
 @Composable
 public fun AccessAIToggleButton(
     onClick: () -> Unit,
@@ -51,8 +56,51 @@ public fun AccessAIToggleButton(
 }
 
 /**
- * First-run explanation (PRD §6.1, §10.2): what AccessAI does, what is sent where, and how to leave.
- * [serverName] describes where requests go, e.g. "the AccessAI service".
+ * The entry point (UI spec "1 · Entry"): a panel pinned to the bottom of the host's home screen with a heading,
+ * one line of explanation and a 72dp button. No announcement on load; the host's screen reads as normal.
+ *
+ * @param hint extra TalkBack text for the button, e.g. "Opens a short privacy notice." before consent.
+ */
+@Composable
+public fun AccessAIEntryPanel(
+    onTurnOn: () -> Unit,
+    modifier: Modifier = Modifier,
+    title: String = "Use this app by voice",
+    text: String = "Ask for your balance, send money and more. You always confirm before money moves.",
+    buttonLabel: String = "Turn on AccessAI accessibility mode",
+    hint: String? = null,
+) {
+    EnsureAccessAITheme {
+        val t = AccessAITheme.current
+        val shape = RoundedCornerShape(topStart = t.panelRadius, topEnd = t.panelRadius)
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(t.surface)
+                .border(t.stroke, t.outline, shape)
+                .padding(start = AccessAISpace.panel, end = AccessAISpace.panel, top = AccessAISpace.panel, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(AccessAISpace.block),
+        ) {
+            Text(title, style = t.headline, color = t.onSurface, modifier = Modifier.semantics { heading() })
+            Text(text, style = t.body, color = t.mutedText)
+            ActionButton(
+                label = buttonLabel,
+                onClick = onTurnOn,
+                icon = AccessAIIcons.Mic,
+                tall = true,
+                contentDescription = listOfNotNull(buttonLabel, hint).joinToString(". "),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * First-run explanation (UI spec "1 · First-run consent"): what is sent, what is kept, how money is protected
+ * and how to leave, shown as the AccessAI panel over the host. Stop is the same as "Not now".
+ *
+ * @param serverName where requests go, e.g. "the AccessAI service".
  */
 @Composable
 public fun AccessAIConsentScreen(
@@ -62,33 +110,57 @@ public fun AccessAIConsentScreen(
     appName: String = "this app",
     serverName: String = "the AccessAI service",
 ) {
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                "About AccessAI",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.semantics { heading() },
-            )
-            Paragraph("AccessAI lets you use $appName by speaking or typing. You can check your balance, send money, and hear your transactions read aloud.")
-            Paragraph("When you speak, your phone's speech service turns your voice into text. AccessAI does not record or keep your voice.")
-            Paragraph("The text of your request is sent to $serverName to work out what you want. Your balance and account details stay in $appName and are not sent.")
-            Paragraph("AccessAI will always read back a payment and wait for you to say \"confirm\" or tap Confirm. Then your phone's own security check (fingerprint, face, or screen lock) must succeed before anything is sent. You can say \"cancel\" at any time.")
-            Paragraph("Never say your PIN, password or one-time code out loud. AccessAI ignores them and never asks for them; your phone or $appName will ask on its own screen.")
-            Paragraph("Microphone access is optional. If you say no, you can type instead. You can turn AccessAI off at any time with the \"Turn off AccessAI\" button.")
-            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-                Text("Continue", style = MaterialTheme.typography.labelLarge)
-            }
-            OutlinedButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-                Text("Not now", style = MaterialTheme.typography.labelLarge)
+    EnsureAccessAITheme {
+        PanelScaffold(modifier = modifier, onStop = onNotNow) {
+            Screen(
+                key = "consent",
+                cue = null,
+                heading = "Before you start",
+                actions = listOf(
+                    Action("Agree and turn on", AccessAIIcons.Check, ActionVariant.PRIMARY, onClick = onContinue),
+                    Action("Not now", AccessAIIcons.Close, ActionVariant.SECONDARY, onClick = onNotNow),
+                ),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ConsentItem(
+                        AccessAIIcons.Cloud,
+                        "What is sent",
+                        "Your phone turns your voice into words. Those words, and the labels on this screen, go to " +
+                            "$serverName only to work out what you mean. Balances and account details stay in $appName.",
+                    )
+                    ConsentItem(
+                        AccessAIIcons.Trash,
+                        "Nothing is kept",
+                        "AccessAI never records your voice. Your words are not stored after each request ends.",
+                    )
+                    ConsentItem(
+                        AccessAIIcons.Shield,
+                        "You stay in control",
+                        "Money moves only after you confirm and your phone checks it's you. Never say a PIN, password or code.",
+                    )
+                    ConsentItem(
+                        AccessAIIcons.Power,
+                        "How to leave",
+                        "Tap Stop at any time, or press Back. Say “cancel” to stop a request.",
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun Paragraph(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onBackground)
+private fun ConsentItem(icon: ImageVector, title: String, text: String) {
+    val t = AccessAITheme.current
+    Row(
+        Modifier.semantics(mergeDescendants = true) { },
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(icon, contentDescription = null, tint = t.primary, modifier = Modifier.size(t.iconSize))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = t.body.copy(fontWeight = FontWeight.Bold), color = t.onSurface)
+            Text(text, style = t.body.copy(lineHeight = t.body.fontSize * 1.35f), color = t.mutedText)
+        }
+    }
 }

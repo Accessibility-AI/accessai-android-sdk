@@ -31,7 +31,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * HTTPS client for the AccessAI service (contract v1). Holds no secrets: [appId] is a public identifier.
+ * HTTPS client for the AccessAI service (contract v1.1). Holds no secrets: [appId] is a public identifier.
  * Requests are never retried automatically.
  */
 public class HttpAccessAIBackend(
@@ -74,7 +74,7 @@ public class HttpAccessAIBackend(
         val response = http.newCall(request).await()
         response.use { r ->
             val text = r.body?.string().orEmpty()
-            if (!r.isSuccessful) throw errorFrom(r.code, text)
+            if (!r.isSuccessful) throw errorFrom(r.code, text, r.header("Retry-After")?.trim()?.toLongOrNull())
             @Suppress("UNCHECKED_CAST")
             if (resSer == null) return Unit as Res
             return try {
@@ -87,10 +87,11 @@ public class HttpAccessAIBackend(
         }
     }
 
-    private fun errorFrom(status: Int, body: String): BackendException {
+    private fun errorFrom(status: Int, body: String, retryAfter: Long?): BackendException {
         val parsed = runCatching { JSON.decodeFromString(ErrorResponse.serializer(), body).error }.getOrNull()
         return when {
-            parsed != null -> BackendException(parsed.code, parsed.message)
+            parsed != null -> BackendException(parsed.code, parsed.message, retryAfterSeconds = retryAfter)
+            status == 429 -> BackendException(BackendException.RATE_LIMITED, "AccessAI is rate limited", retryAfterSeconds = retryAfter)
             status >= 500 -> BackendException(BackendException.SERVER, "AccessAI service error ($status)")
             else -> BackendException(BackendException.BAD_RESPONSE, "AccessAI request failed ($status)")
         }

@@ -1,5 +1,6 @@
 package com.accessai.core.engine
 
+import com.accessai.core.net.BackendException
 import com.accessai.core.protocol.CreateConfirmationResponse
 import com.accessai.core.protocol.InterpretResponse
 import com.accessai.core.testing.Harness
@@ -23,7 +24,7 @@ class DialogEngineTest {
         val h = Harness()
         h.engine.submit("What is my balance?")
         assertContains(h.speech.last, "eighty-four thousand two hundred and fifty naira")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.ANSWER, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test
@@ -159,7 +160,7 @@ class DialogEngineTest {
         h.engine.submit("Send 5000 to Amaka")
         h.engine.submit("cancel")
         assertContains(h.speech.last, "Nothing was sent")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.CANCELLED, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
         h.engine.submit("confirm transfer")
         h.engine.confirmByTouch()
         assertTrue(h.bank.transfers.isEmpty())
@@ -224,7 +225,7 @@ class DialogEngineTest {
         h.engine.submit("confirm transfer")
         assertContains(h.speech.last, "did not try again")
         assertFalse(h.speech.all().contains("successful"))
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test
@@ -233,6 +234,48 @@ class DialogEngineTest {
         h.engine.submit("What is my balance?")
         assertContains(h.speech.last, "check your internet connection")
     }
+
+    // ---- Contract v1.1 service errors ------------------------------------------------------------
+
+    @Test
+    fun `rate limited service asks the user to try again shortly`() = runTest {
+        val h = Harness(backendOverride = { ScriptedBackend(interpretErrorCode = BackendException.RATE_LIMITED) })
+        h.engine.submit("What is my balance?")
+        assertContains(h.speech.last, "busy right now")
+        assertEquals(OutcomeKind.PROBLEM, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
+    }
+
+    @Test
+    fun `expired session while preparing a confirmation starts a new session once`() = runTest {
+        var backend: ScriptedBackend? = null
+        val h = Harness(backendOverride = {
+            ScriptedBackend(interpretResponse = transferTo("Amaka"), createConfirmationErrors = ArrayDeque(listOf(BackendException.SESSION_EXPIRED)))
+                .also { backend = it }
+        })
+        h.engine.submit("send 5000 to Amaka")
+        assertIs<DialogState.AwaitingConfirmation>(h.engine.state.value)
+        assertEquals(listOf("s1", "s2"), backend!!.createConfirmationRequests.map { it.sessionId })
+    }
+
+    @Test
+    fun `expired session at confirm sends nothing and never retries`() = runTest {
+        var backend: ScriptedBackend? = null
+        val h = Harness(backendOverride = {
+            ScriptedBackend(interpretResponse = transferTo("Amaka"), confirmErrors = ArrayDeque(listOf(BackendException.SESSION_EXPIRED)))
+                .also { backend = it }
+        })
+        h.engine.submit("send 5000 to Amaka")
+        h.engine.submit("confirm transfer")
+        assertContains(h.speech.last, "nothing was sent")
+        assertEquals(1, backend!!.confirmRequests.size)
+        assertTrue(h.bank.transfers.isEmpty())
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
+    }
+
+    private fun transferTo(name: String) = InterpretResponse(
+        outcome = "action", actionId = "transfer_money", confidence = 0.95,
+        params = mapOf("recipient" to JsonPrimitive(name), "amount_minor" to JsonPrimitive(500_000)),
+    )
 
     // ---- The interpreter cannot bypass the allowlist (FR-05, FR-11) ---------------------------
 
@@ -243,7 +286,7 @@ class DialogEngineTest {
         })
         h.engine.submit("delete my account")
         assertContains(h.speech.last, "can't do that")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.NOT_UNDERSTOOD, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test

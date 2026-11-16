@@ -1,6 +1,7 @@
 package com.accessai.core.actions
 
 import com.accessai.core.Announcement
+import com.accessai.core.engine.ConfirmationDetails
 
 public enum class Sensitivity(public val wireName: String) {
     /** Reads data, e.g. balance. */
@@ -55,9 +56,26 @@ public sealed interface ActionResult {
         val items: List<Announcement> = emptyList(),
         /** Spoken when [items] is empty and the action is a list. */
         val emptyMessage: Announcement? = null,
+        /** Optional screen heading, e.g. "Your balance" or "Payment sent". */
+        val title: String? = null,
+        /** Optional headline value shown in large type, e.g. "₦84,250". */
+        val value: String? = null,
+        /** Optional secondary line, e.g. "Main account, as of 2:14 pm." */
+        val detail: String? = null,
+        /**
+         * The announcement invites a reply, so AccessAI listens straight after it. Defaults to true for
+         * NAVIGATE actions (they usually open a screen and ask what to do there).
+         */
+        val followUp: Boolean? = null,
     ) : ActionResult
 
-    public data class Failure(val announcement: Announcement) : ActionResult
+    public data class Failure(
+        val announcement: Announcement,
+        /** Optional screen heading, e.g. "Payment not sent". */
+        val title: String? = null,
+        /** Optional secondary line, e.g. "Your balance is still ₦84,250." */
+        val detail: String? = null,
+    ) : ActionResult
 }
 
 public class ActionSpec internal constructor(
@@ -71,14 +89,18 @@ public class ActionSpec internal constructor(
     public val examples: List<String>,
     internal val validator: suspend (ResolvedParams) -> Validation,
     internal val summary: ((ResolvedParams) -> Announcement)?,
+    internal val details: ((ResolvedParams) -> ConfirmationDetails)?,
     /** Phrase the user must say to confirm, e.g. "confirm transfer". "confirm" is always accepted. */
     public val confirmPhrase: String,
     internal val handler: suspend (ActionContext) -> ActionResult,
 ) {
     public fun param(name: String): ParamSpec? = params.firstOrNull { it.name == name }
 
-    /** Sensitive actions need OS biometric or device-credential authentication before a token is requested. */
-    public val requiresDeviceAuth: Boolean get() = sensitivity == Sensitivity.SENSITIVE
+    /**
+     * Every confirmed action needs OS biometric or device-credential authentication before a token is requested:
+     * contract v1.1 makes the service require a device signature on every confirmation, whatever the sensitivity.
+     */
+    public val requiresDeviceAuth: Boolean get() = requiresConfirmation
 }
 
 /**
@@ -112,6 +134,7 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
     private val examples = mutableListOf<String>()
     private var validator: suspend (ResolvedParams) -> Validation = { Validation.Valid }
     private var summary: ((ResolvedParams) -> Announcement)? = null
+    private var details: ((ResolvedParams) -> ConfirmationDetails)? = null
     private var handler: (suspend (ActionContext) -> ActionResult)? = null
 
     public fun text(name: String, description: String, required: Boolean = true, prompt: String = "What is the $name?", resolver: ParamResolver? = null) {
@@ -144,6 +167,11 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
         summary = block
     }
 
+    /** Optional structured read-back for the confirmation card. The spoken summary is still required. */
+    public fun details(block: (ResolvedParams) -> ConfirmationDetails) {
+        details = block
+    }
+
     public fun handler(block: suspend (ActionContext) -> ActionResult) {
         handler = block
     }
@@ -171,6 +199,7 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
             examples = examples.toList(),
             validator = validator,
             summary = summary,
+            details = details,
             confirmPhrase = confirmPhrase.trim().lowercase(),
             handler = requireNotNull(handler) { "Action '$id' has no handler { }" },
         )
