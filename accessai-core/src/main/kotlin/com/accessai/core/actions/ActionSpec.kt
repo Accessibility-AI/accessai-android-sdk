@@ -55,9 +55,21 @@ public sealed interface ActionResult {
         val items: List<Announcement> = emptyList(),
         /** Spoken when [items] is empty and the action is a list. */
         val emptyMessage: Announcement? = null,
+        /** Optional screen heading, e.g. "Your balance" or "Payment sent". */
+        val title: String? = null,
+        /** Optional headline value shown in large type, e.g. "₦84,250". */
+        val value: String? = null,
+        /** Optional secondary line, e.g. "Main account, as of 2:14 pm." */
+        val detail: String? = null,
     ) : ActionResult
 
-    public data class Failure(val announcement: Announcement) : ActionResult
+    public data class Failure(
+        val announcement: Announcement,
+        /** Optional screen heading, e.g. "Payment not sent". */
+        val title: String? = null,
+        /** Optional secondary line, e.g. "Your balance is still ₦84,250." */
+        val detail: String? = null,
+    ) : ActionResult
 }
 
 public class ActionSpec internal constructor(

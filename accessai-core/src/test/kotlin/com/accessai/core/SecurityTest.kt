@@ -6,6 +6,7 @@ import com.accessai.core.actions.Sensitivity
 import com.accessai.core.actions.action
 import com.accessai.core.auth.AuthOutcome
 import com.accessai.core.engine.DialogState
+import com.accessai.core.engine.OutcomeKind
 import com.accessai.core.net.LocalRulesBackend
 import com.accessai.core.privacy.SensitiveData
 import com.accessai.core.screen.ScreenDescriptor
@@ -129,7 +130,7 @@ class SecurityTest {
         repeat(3) { h.auth.script += AuthOutcome.Failed("That didn't match.") }
         h.engine.submit("Send 5000 to Amaka")
         repeat(3) { h.engine.submit("confirm transfer") }
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
         assertContains(h.speech.last, "cancelled")
         h.engine.submit("confirm transfer")
         assertTrue(h.bank.transfers.isEmpty())
@@ -143,7 +144,7 @@ class SecurityTest {
         h.engine.confirmByTouch()
         assertContains(h.speech.last, "set up a screen lock")
         assertTrue(h.bank.transfers.isEmpty())
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test

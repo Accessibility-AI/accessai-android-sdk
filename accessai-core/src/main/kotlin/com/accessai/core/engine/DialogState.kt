@@ -35,6 +35,43 @@ public sealed interface DialogState {
 
     /** Reading a list one item at a time ("next", "previous", "stop"). */
     public data class ReadingList(val items: List<Announcement>, val index: Int) : DialogState
+
+    /**
+     * A request has finished (or could not start) and its result stays on screen until the user asks something
+     * else or the host calls [DialogEngine.dismiss]. Behaves like [Idle] for input. The UI picks a screen from
+     * [kind]: answer, success, failure, offline, not understood, cancelled or problem.
+     */
+    public data class Outcome(
+        val kind: OutcomeKind,
+        /** Short heading, e.g. "Your balance" or "Payment sent". */
+        val title: String,
+        /** What was said, in full. */
+        val announcement: Announcement,
+        /** The headline value in large type, e.g. "₦84,250", when there is one. */
+        val value: String? = null,
+        /** A secondary line, e.g. "Main account, as of 2:14 pm." or a reference number. */
+        val detail: String? = null,
+        val actionId: String? = null,
+        /** For [OutcomeKind.NOT_UNDERSTOOD]: misses in a row, so the UI can offer typing first after three. */
+        val misses: Int = 0,
+    ) : DialogState
+}
+
+public enum class OutcomeKind {
+    /** A read-only or navigation action answered. Nothing was changed. */
+    ANSWER,
+    /** A confirmed action succeeded. Only ever set from a host's ActionResult.Success. */
+    SUCCESS,
+    /** The host reported failure, or a confirmation could not be completed. */
+    FAILURE,
+    /** AccessAI could not be reached. Nothing was sent or changed. */
+    OFFLINE,
+    /** The request wasn't understood, or isn't something this app supports. */
+    NOT_UNDERSTOOD,
+    /** The user cancelled. Nothing was sent. */
+    CANCELLED,
+    /** The service was busy or failed. Nothing was sent or changed. */
+    PROBLEM,
 }
 
 public enum class InputKind {

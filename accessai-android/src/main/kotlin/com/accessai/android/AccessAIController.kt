@@ -128,6 +128,9 @@ public class AccessAIController internal constructor(
             override fun onError(message: String) {
                 engine.say(Announcement.of(message))
             }
+            override fun onNoMatch() {
+                scope.launch { engine.speechNotRecognised() }
+            }
             override fun onEnd() {
                 _listening.value = ListeningState.Idle
             }
@@ -160,6 +163,8 @@ public class AccessAIController internal constructor(
     public fun describeScreen(): Unit = launch { engine.describeScreen() }
     public fun choose(index: Int): Unit = launch { engine.choose(index) }
     public fun repeat(): Unit = engine.repeat()
+    /** Clears a finished result (the "Done" button). */
+    public fun dismiss(): Unit = engine.dismiss()
     public fun stopSpeaking(): Unit = engine.stopSpeaking()
 
     public fun publishScreen(descriptor: ScreenDescriptor?) {

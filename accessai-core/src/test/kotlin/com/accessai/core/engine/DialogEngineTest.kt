@@ -24,7 +24,7 @@ class DialogEngineTest {
         val h = Harness()
         h.engine.submit("What is my balance?")
         assertContains(h.speech.last, "eighty-four thousand two hundred and fifty naira")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.ANSWER, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test
@@ -160,7 +160,7 @@ class DialogEngineTest {
         h.engine.submit("Send 5000 to Amaka")
         h.engine.submit("cancel")
         assertContains(h.speech.last, "Nothing was sent")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.CANCELLED, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
         h.engine.submit("confirm transfer")
         h.engine.confirmByTouch()
         assertTrue(h.bank.transfers.isEmpty())
@@ -225,7 +225,7 @@ class DialogEngineTest {
         h.engine.submit("confirm transfer")
         assertContains(h.speech.last, "did not try again")
         assertFalse(h.speech.all().contains("successful"))
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test
@@ -242,7 +242,7 @@ class DialogEngineTest {
         val h = Harness(backendOverride = { ScriptedBackend(interpretErrorCode = BackendException.RATE_LIMITED) })
         h.engine.submit("What is my balance?")
         assertContains(h.speech.last, "busy right now")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.PROBLEM, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test
@@ -269,7 +269,7 @@ class DialogEngineTest {
         assertContains(h.speech.last, "nothing was sent")
         assertEquals(1, backend!!.confirmRequests.size)
         assertTrue(h.bank.transfers.isEmpty())
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.FAILURE, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     private fun transferTo(name: String) = InterpretResponse(
@@ -286,7 +286,7 @@ class DialogEngineTest {
         })
         h.engine.submit("delete my account")
         assertContains(h.speech.last, "can't do that")
-        assertEquals(DialogState.Idle, h.engine.state.value)
+        assertEquals(OutcomeKind.NOT_UNDERSTOOD, assertIs<DialogState.Outcome>(h.engine.state.value).kind)
     }
 
     @Test

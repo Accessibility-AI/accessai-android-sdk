@@ -75,13 +75,14 @@ public class DialogEngine(
     private var sessionId: String? = null
     private var draft: Draft? = null
     private var pending: PendingConfirmation? = null
+    private var misses = 0
 
     // ---- Public API -------------------------------------------------------------------------
 
     /** Handles one user utterance (spoken or typed). Calls are processed one at a time. */
     public suspend fun submit(text: String, source: InputSource = InputSource.VOICE): Unit = mutex.withLock {
         if (text.isBlank()) {
-            say(Announcement.of("I didn't catch that. Please try again, or type your request."))
+            notUnderstood(notCaught())
             return@withLock
         }
         // Before anything else: PINs and passwords are dropped, long numbers redacted. The raw text goes nowhere.
@@ -137,6 +138,14 @@ public class DialogEngine(
         continueDraft(d)
     }
 
+    /** Clears a finished result (the "Done" button), back to [DialogState.Idle]. */
+    public fun dismiss() {
+        _state.update { if (it is DialogState.Outcome) DialogState.Idle else it }
+    }
+
+    /** The speech recogniser heard nothing it could use. Shown like any other request that wasn't understood. */
+    public suspend fun speechNotRecognised(): Unit = mutex.withLock { notUnderstood(notCaught()) }
+
     public fun repeat() {
         _lastAnnouncement.value?.let { speech.speak(it) }
     }
@@ -171,6 +180,7 @@ public class DialogEngine(
         speech.stop()
         _transcript.value = emptyList()
         _lastAnnouncement.value = null
+        misses = 0
         _state.value = DialogState.Idle
     }
 
@@ -183,7 +193,7 @@ public class DialogEngine(
             callInterpret(raw)
         } catch (e: BackendException) {
             _state.value = previousState
-            say(connectivityMessage(e, "understand that"))
+            if (previousState.isResting) serviceFailure(e, "understand that") else say(connectivityMessage(e, "understand that"))
             return
         }
         handleInterpretation(response, source)
@@ -276,8 +286,7 @@ public class DialogEngine(
                 throw e
             } catch (e: Exception) {
                 draft = null
-                _state.value = DialogState.Idle
-                say(Announcement.of("Sorry, I couldn't look that up right now. Nothing was done."))
+                finish(OutcomeKind.PROBLEM, "Couldn't look that up", Announcement.of("Sorry, I couldn't look that up right now. Nothing was done."))
                 return
             }
             when (resolution) {
@@ -342,16 +351,15 @@ public class DialogEngine(
 
     private fun clarify(message: String?) {
         val text = message?.takeIf { it.isNotBlank() } ?: "Sorry, I'm not sure what you meant. You can say help to hear what I can do."
-        val d = draft
-        _state.value = if (d != null) DialogState.AwaitingInput(d.spec.id, null, InputKind.CLARIFY, Announcement.of(text)) else DialogState.Idle
+        val d = draft ?: return notUnderstood(text)
+        _state.value = DialogState.AwaitingInput(d.spec.id, null, InputKind.CLARIFY, Announcement.of(text))
         say(Announcement.of(text))
     }
 
     private fun unsupported(message: String?) {
         draft = null
-        _state.value = DialogState.Idle
         val text = message?.takeIf { it.isNotBlank() } ?: "Sorry, I can't do that yet."
-        say(Announcement.of("$text ${helpText()}"))
+        notUnderstood("$text ${helpText()}", title = "I can't do that yet")
     }
 
     // ---- Confirmation -----------------------------------------------------------------------
@@ -370,14 +378,12 @@ public class DialogEngine(
                 create()
             }
         } catch (e: BackendException) {
-            _state.value = DialogState.Idle
-            say(connectivityMessage(e, "prepare that for confirmation").plus(Announcement.of("Nothing was sent.")))
+            serviceFailure(e, "prepare that for confirmation", Announcement.of("Nothing was sent."))
             return
         }
         if (!ticket.paramsSha256.equals(localHash, ignoreCase = true)) {
             cancelRemote(PendingConfirmation(spec, d, params, ticket.pendingId, Instant.EPOCH, localHash))
-            _state.value = DialogState.Idle
-            say(Announcement.of("Something didn't match while preparing your request, so I stopped. Nothing was sent."))
+            finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("Something didn't match while preparing your request, so I stopped. Nothing was sent."))
             return
         }
         val expiresAt = runCatching { Instant.parse(ticket.expiresAt) }.getOrElse { clock().plusSeconds(60) }
@@ -450,15 +456,13 @@ public class DialogEngine(
         // Single use: the pending confirmation is consumed before anything is awaited.
         pending = null
         if (clock() >= p.expiresAt) {
-            _state.value = DialogState.Idle
-            say(Announcement.of("That confirmation has expired, so nothing was sent. Please make the request again."))
+            finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("That confirmation has expired, so nothing was sent. Please make the request again."))
             return
         }
         val session = try {
             ensureSession()
         } catch (e: BackendException) {
-            _state.value = DialogState.Idle
-            say(connectivityMessage(e, "confirm your request").plus(Announcement.of("Nothing was sent.")))
+            serviceFailure(e, "confirm your request", Announcement.of("Nothing was sent."))
             return
         }
 
@@ -480,8 +484,7 @@ public class DialogEngine(
                 is AuthOutcome.Authenticated -> proof = outcome.proof
                 is AuthOutcome.Unavailable -> {
                     cancelRemote(p)
-                    _state.value = DialogState.Idle
-                    say(Announcement.of("${outcome.message} Nothing was sent."))
+                    finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("${outcome.message} Nothing was sent."))
                     return
                 }
                 AuthOutcome.Cancelled, is AuthOutcome.Failed -> {
@@ -489,8 +492,7 @@ public class DialogEngine(
                     val why = (outcome as? AuthOutcome.Failed)?.message ?: "You closed the check."
                     if (p.authAttempts >= config.maxAuthAttempts) {
                         cancelRemote(p)
-                        _state.value = DialogState.Idle
-                        say(Announcement.of("$why I've cancelled the request. Nothing was sent."))
+                        finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("$why I've cancelled the request. Nothing was sent."))
                     } else {
                         // Nothing was signed, so the same pending confirmation can be retried.
                         pending = p
@@ -510,14 +512,12 @@ public class DialogEngine(
                 BackendException.SESSION_EXPIRED -> {
                     // The pending confirmation belonged to the expired session, so it can't be confirmed any more.
                     sessionId = null
-                    _state.value = DialogState.Idle
-                    say(Announcement.of("Your AccessAI session ended, so nothing was sent. Please make the request again."))
+                    finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("Your AccessAI session ended, so nothing was sent. Please make the request again."))
                 }
                 BackendException.AUTH_INVALID -> {
                     // E.g. new fingerprint enrolled: the device key changed. Re-register it on the next session.
                     sessionId = null
-                    _state.value = DialogState.Idle
-                    say(Announcement.of("I couldn't verify it was you, so nothing was sent. Please make the request again."))
+                    finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("I couldn't verify it was you, so nothing was sent. Please make the request again."))
                 }
                 BackendException.NOT_A_CONFIRMATION -> {
                     pending = p
@@ -525,13 +525,9 @@ public class DialogEngine(
                     reprompt(p, "That wasn't recognised as a confirmation.")
                 }
                 BackendException.CONFIRMATION_EXPIRED, BackendException.CONFIRMATION_USED -> {
-                    _state.value = DialogState.Idle
-                    say(Announcement.of("That confirmation is no longer valid, so nothing was sent. Please make the request again."))
+                    finish(OutcomeKind.FAILURE, NOT_SENT, Announcement.of("That confirmation is no longer valid, so nothing was sent. Please make the request again."))
                 }
-                else -> {
-                    _state.value = DialogState.Idle
-                    say(connectivityMessage(e, "confirm your request").plus(Announcement.of("Nothing was sent.")))
-                }
+                else -> serviceFailure(e, "confirm your request", Announcement.of("Nothing was sent."))
             }
             return
         }
@@ -562,12 +558,14 @@ public class DialogEngine(
         val result = try {
             withTimeout(config.actionTimeoutMillis) { spec.handler(context) }
         } catch (e: TimeoutCancellationException) {
-            ActionResult.Failure(
-                Announcement.of(
-                    if (spec.requiresConfirmation) "I didn't get a result in time, so I don't know if it went through. I did not try again. Please check your transactions before trying again."
-                    else "That is taking too long, so I stopped waiting. Please try again.",
-                ),
-            )
+            if (spec.requiresConfirmation) {
+                ActionResult.Failure(
+                    Announcement.of("I didn't get a result in time, so I don't know if it went through. I did not try again. Please check your transactions before trying again."),
+                    title = "Result unknown",
+                )
+            } else {
+                ActionResult.Failure(Announcement.of("That is taking too long, so I stopped waiting. Please try again."), title = "Taking too long")
+            }
         } catch (e: CancellationException) {
             _state.value = DialogState.Idle
             throw e
@@ -578,17 +576,27 @@ public class DialogEngine(
         when (result) {
             is ActionResult.Success -> {
                 if (result.items.isEmpty()) {
-                    _state.value = DialogState.Idle
-                    say(result.announcement + (result.emptyMessage ?: Announcement("")))
+                    finish(
+                        kind = if (spec.requiresConfirmation) OutcomeKind.SUCCESS else OutcomeKind.ANSWER,
+                        title = result.title ?: if (spec.requiresConfirmation) "Done" else spec.name.replaceFirstChar { it.uppercase() },
+                        announcement = result.announcement + (result.emptyMessage ?: Announcement("")),
+                        value = result.value,
+                        detail = result.detail,
+                        actionId = spec.id,
+                    )
                 } else {
+                    misses = 0
                     _state.value = DialogState.ReadingList(result.items, 0)
                     say(result.announcement + itemPrompt(result.items, 0))
                 }
             }
-            is ActionResult.Failure -> {
-                _state.value = DialogState.Idle
-                say(result.announcement)
-            }
+            is ActionResult.Failure -> finish(
+                kind = OutcomeKind.FAILURE,
+                title = result.title ?: if (spec.requiresConfirmation) NOT_SENT else "That didn't work",
+                announcement = result.announcement,
+                detail = result.detail,
+                actionId = spec.id,
+            )
         }
     }
 
@@ -609,14 +617,12 @@ public class DialogEngine(
                     p != null -> {
                         pending = null
                         cancelRemote(p)
-                        _state.value = DialogState.Idle
-                        say(Announcement.of("Cancelled. Nothing was sent."))
+                        finish(OutcomeKind.CANCELLED, "Cancelled", Announcement.of("Cancelled. Nothing was sent."))
                     }
                     s is DialogState.Executing -> say(Announcement.of("It's too late to cancel; I'm waiting for the result."))
                     draft != null -> {
                         draft = null
-                        _state.value = DialogState.Idle
-                        say(Announcement.of("Okay, cancelled."))
+                        finish(OutcomeKind.CANCELLED, "Cancelled", Announcement.of("Okay, cancelled. Nothing was done."))
                     }
                     s is DialogState.ReadingList -> {
                         speech.stop()
@@ -696,6 +702,48 @@ public class DialogEngine(
         )
     }
 
+    /** Puts a result on screen and says it. */
+    private fun finish(
+        kind: OutcomeKind,
+        title: String,
+        announcement: Announcement,
+        value: String? = null,
+        detail: String? = null,
+        actionId: String? = null,
+    ) {
+        if (kind != OutcomeKind.NOT_UNDERSTOOD) misses = 0
+        _state.value = DialogState.Outcome(kind, title, announcement, value, detail, actionId, misses)
+        say(announcement)
+    }
+
+    /** Not understood. While AccessAI is waiting for a specific answer it keeps waiting, and only says so. */
+    private fun notUnderstood(text: String, title: String = "I didn't catch that") {
+        if (!_state.value.isResting && _state.value !is DialogState.Interpreting) {
+            say(Announcement.of(text))
+            return
+        }
+        misses++
+        finish(OutcomeKind.NOT_UNDERSTOOD, title, Announcement.of(text))
+    }
+
+    /** The service couldn't be reached or failed. */
+    private fun serviceFailure(e: BackendException, doing: String, then: Announcement? = null) {
+        val message = connectivityMessage(e, doing).let { m -> then?.let { m + it } ?: m }
+        when {
+            e.isConnectivity -> finish(OutcomeKind.OFFLINE, "No connection", message)
+            e.code == BackendException.RATE_LIMITED -> finish(OutcomeKind.PROBLEM, "AccessAI is busy", message)
+            else -> finish(OutcomeKind.PROBLEM, "Something went wrong", message)
+        }
+    }
+
+    private fun notCaught(): String {
+        val examples = registry.all().mapNotNull { it.examples.firstOrNull() }.take(2)
+        val tryThis = if (examples.isEmpty()) "Say help to hear what I can do." else "Try: " + examples.joinToString(" or ") { "\"$it\"" } + "."
+        return "I didn't catch that. $tryThis"
+    }
+
+    private val DialogState.isResting: Boolean get() = this is DialogState.Idle || this is DialogState.Outcome
+
     private fun connectivityMessage(e: BackendException, doing: String): Announcement = Announcement.of(
         when {
             e.isConnectivity -> "I couldn't connect to AccessAI to $doing. Please check your internet connection. You can still type, or say repeat or cancel."
@@ -712,6 +760,10 @@ public class DialogEngine(
         0 -> ""
         1 -> items[0]
         else -> items.dropLast(1).joinToString(", ") + " or " + items.last()
+    }
+
+    private companion object {
+        const val NOT_SENT = "Not sent"
     }
 
     private class Resolved(val value: ParamValue, val label: String, val spokenLabel: String)

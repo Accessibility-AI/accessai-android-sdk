@@ -26,6 +26,8 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         fun onPartial(text: String)
         fun onResult(text: String)
         fun onError(message: String)
+        /** Heard nothing usable (no match, silence, or an empty result). */
+        fun onNoMatch()
         fun onEnd()
     }
 
@@ -60,8 +62,7 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
             override fun onResults(results: Bundle?) {
                 if (!current()) return
                 val text = results.bestResult()
-                if (text.isNullOrBlank()) listener.onError("I didn't catch that. Please try again, or type your request.")
-                else listener.onResult(text)
+                if (text.isNullOrBlank()) listener.onNoMatch() else listener.onResult(text)
                 listener.onEnd()
             }
             override fun onError(error: Int) {
@@ -72,7 +73,8 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                     mainHandler.post { if (current()) r.startListening(intentFor(attempt)) }
                     return
                 }
-                listener.onError(messageFor(error))
+                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) listener.onNoMatch()
+                else listener.onError(messageFor(error))
                 listener.onEnd()
             }
             override fun onBeginningOfSpeech() = Unit
