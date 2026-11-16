@@ -10,6 +10,7 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import java.util.Locale
 
 /** What the microphone is doing, for the UI. */
@@ -34,6 +35,8 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
     private val appContext = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    /** Bumped by every start and cancel, so a delayed retry never revives a session the user has left. */
+    private var sessions = 0
     private val tone by lazy { runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull() }
 
     val isAvailable: Boolean get() = SpeechRecognizer.isRecognitionAvailable(appContext)
@@ -42,19 +45,29 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
      * Attempts in order: the configured locale on-device, the configured locale online, then plain English
      * online. Recognizers often have no pack for locales like en-NG and fail with "language not supported"
      * before hearing anything; any other error is reported as is. Retries reuse the same recognizer:
-     * destroying it and creating another straight away loses the new session on a cold speech service.
+     * destroying it and creating another straight away loses the new session on a cold speech service
+     * (ERROR_SERVER_DISCONNECTED). So each recognizer is released as soon as its session ends, and a session the
+     * service drops before the microphone opens is retried once, quietly, with a fresh recognizer.
      */
     fun start(listener: Listener) {
+        start(listener, reconnect = true)
+    }
+
+    private fun start(listener: Listener, reconnect: Boolean) {
         cancel()
         val r = SpeechRecognizer.createSpeechRecognizer(appContext)
         recognizer = r
+        val generation = ++sessions
         var attempt = 0
+        var ready = false
         // A cancelled recognizer can still deliver a late callback (typically ERROR_CLIENT from cancel()).
         // Reporting it would announce a stale error over the next session, which the microphone then hears.
         val current = { recognizer === r }
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                if (current()) tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+                if (!current()) return
+                ready = true
+                tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
             }
             override fun onPartialResults(partialResults: Bundle?) {
                 if (current()) partialResults.bestResult()?.let(listener::onPartial)
@@ -64,9 +77,18 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                 val text = results.bestResult()
                 if (text.isNullOrBlank()) listener.onNoMatch() else listener.onResult(text)
                 listener.onEnd()
+                release(r)
             }
             override fun onError(error: Int) {
                 if (!current()) return
+                if (error in DROPPED && !ready && reconnect) {
+                    // The service dropped the session before listening. Nothing was heard, so start again once.
+                    Log.d(TAG, "Speech session dropped before listening (error $error); retrying once")
+                    recognizer = null
+                    r.destroy()
+                    mainHandler.postDelayed({ if (sessions == generation && recognizer == null) start(listener, reconnect = false) }, RECONNECT_DELAY_MS)
+                    return
+                }
                 if (error in LANGUAGE_ERRORS && attempt < LAST_ATTEMPT) {
                     attempt++
                     // Posted so the recognizer has finished reporting this error before it listens again.
@@ -76,6 +98,7 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
                 if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) listener.onNoMatch()
                 else listener.onError(messageFor(error))
                 listener.onEnd()
+                release(r)
             }
             override fun onBeginningOfSpeech() = Unit
             override fun onRmsChanged(rmsdB: Float) = Unit
@@ -107,8 +130,19 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         recognizer?.stopListening()
     }
 
+    /** Frees [r] once its session has ended, so the next start never destroys and creates in the same instant. */
+    private fun release(r: SpeechRecognizer) {
+        mainHandler.post {
+            if (recognizer === r) {
+                recognizer = null
+                r.destroy()
+            }
+        }
+    }
+
     /** Stops listening and discards what was heard. */
     fun cancel() {
+        sessions++
         val r = recognizer ?: return
         // Cleared first so any callback r still delivers is recognised as stale.
         recognizer = null
@@ -139,5 +173,9 @@ internal class AndroidSpeechInput(context: Context, private val locale: Locale) 
         val LANGUAGE_ERRORS = setOf(12, 13)
         const val FALLBACK_LANGUAGE = "en-US"
         const val LAST_ATTEMPT = 2
+        const val TAG = "AccessAI"
+        const val RECONNECT_DELAY_MS = 300L
+        // ERROR_CLIENT, and ERROR_SERVER_DISCONNECTED (API 31+): the session was lost, not the user's speech.
+        val DROPPED = setOf(SpeechRecognizer.ERROR_CLIENT, 11)
     }
 }
