@@ -16,7 +16,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.2")
+    implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.3.0")
 }
 ```
 
@@ -75,18 +75,41 @@ class App : Application() {
 
 ## 3. Add the entry point and mode screen
 
+AccessAI's screens draw over your app as a bottom panel. Keep your screen composed underneath, and hide it from
+TalkBack while AccessAI's panel is showing so focus stays in the panel.
+
 ```kotlin
 val controller = AccessAI.controller
 val enabled by controller.enabled.collectAsStateWithLifecycle()
 val consented by controller.consented.collectAsStateWithLifecycle()
+var showConsent by rememberSaveable { mutableStateOf(false) }
+val overlay = enabled || showConsent
 
-if (enabled) {
-    AccessAITheme { AccessAIModeScreen(onExit = { }) }
-} else {
-    AccessAIToggleButton(onClick = { if (consented) controller.enable() else showConsent = true })
+// Your brand: five colour roles and a corner radius. High contrast and reduced motion follow the system.
+val brand: @Composable (@Composable () -> Unit) -> Unit = { content ->
+    AccessAITheme(colors = AccessAIColors(primary = Color(0xFF1B6B2A), onSurface = Color(0xFF0B1F14)), cornerRadius = 28.dp, content = content)
 }
-// First run: AccessAIConsentScreen(onContinue = { controller.acceptConsent(); controller.enable() }, onNotNow = { … })
+
+Box(Modifier.fillMaxSize().then(if (overlay) Modifier.clearAndSetSemantics { } else Modifier)) {
+    HomeScreen()   // pin the entry panel to the bottom of your home screen:
+    // brand { AccessAIEntryPanel(onTurnOn = { if (consented) controller.enable() else showConsent = true }) }
+}
+when {
+    showConsent -> brand {
+        AccessAIConsentScreen(
+            appName = "AccessPay",
+            onContinue = { controller.acceptConsent(); showConsent = false; controller.enable() },
+            onNotNow = { showConsent = false },
+        )
+    }
+    enabled -> brand { AccessAIModeScreen(onExit = { }) }
+}
 ```
+
+Your action results can fill the result screens: `ActionResult.Success(announcement, title = "Your balance",
+value = "₦84,250", detail = "Main account, as of 2:14 pm.")`, `ActionResult.Failure(announcement, title = "Payment not sent")`,
+and `details { p -> ConfirmationDetails(verb = "Send", amount = …, recipient = …) }` for the confirmation card.
+A result that asks the user for more (`followUp = true`, the default for NAVIGATE actions) makes AccessAI listen for the reply.
 
 ## 4. Describe your screens
 

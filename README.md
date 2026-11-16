@@ -24,7 +24,7 @@ Part of AccessAI:
 |---|---|---|
 | `accessai-core` | Action DSL and registry, `DialogEngine` (the conversation and safety logic), confirmation flow, amount parsing, naira speech formatting, HTTP client, offline `LocalRulesBackend` | No (pure Kotlin/JVM) |
 | `accessai-android` | `AccessAI` entry point, `AccessAIController`, speech recognition, text-to-speech, TalkBack-aware announcements | Yes |
-| `accessai-compose` | `AccessAIModeScreen`, `AccessAIConsentScreen`, `AccessAIToggleButton`, `AccessAIScreen`, high-contrast `AccessAITheme` | Yes |
+| `accessai-compose` | `AccessAIModeScreen` (spec voice-mode panel), `AccessAIEntryPanel`, `AccessAIConsentScreen`, `AccessAIScreen`, `AccessAITheme` with high contrast, spec components (`ActionButton`, `MicButton`, `StatusBanner`, `ConfirmationCard`, …) | Yes |
 | `sample` | Minimal host app with simulated funds; CI builds it into an installable APK | Yes |
 
 ## Quick start
@@ -32,7 +32,7 @@ Part of AccessAI:
 See [docs/INTEGRATION.md](docs/INTEGRATION.md). The service contract is in [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ```kotlin
-implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.2.2")
+implementation("com.github.Accessibility-AI.accessai-android-sdk:accessai-compose:0.3.0")
 ```
 
 ## How a transfer flows
@@ -64,4 +64,4 @@ Locally you need only JDK 17 to build and test the core, which holds all of the 
 
 ## Status
 
-v0.2.2, hackathon MVP. English only. Simulated funds only. Not a compliance certification.
+v0.3.0, hackathon MVP. English only. Simulated funds only. Not a compliance certification.
