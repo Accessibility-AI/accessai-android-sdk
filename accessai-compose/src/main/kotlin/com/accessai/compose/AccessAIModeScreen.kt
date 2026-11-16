@@ -184,7 +184,9 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
 
     // Screens that ask for an answer (confirm, which one, a missing detail) listen for it once AccessAI has finished
     // speaking, so the microphone never hears AccessAI. Up to three tries while the same question is on screen.
-    val awaitingAnswer: DialogState? = state.takeIf { it is DialogState.AwaitingConfirmation || it is DialogState.AwaitingInput }
+    val awaitingAnswer: DialogState? = state.takeIf {
+        it is DialogState.AwaitingConfirmation || it is DialogState.AwaitingInput || (it is DialogState.Outcome && it.followUp)
+    }
     LaunchedEffect(awaitingAnswer, stopped, typing) {
         if (awaitingAnswer == null || stopped || typing) return@LaunchedEffect
         if (controller.isScreenReaderActive || !controller.isVoiceAvailable || !controller.hasMicrophonePermission) return@LaunchedEffect
@@ -228,6 +230,14 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
             stopped -> ExitScreen(onTurnOnAgain = { stopped = false; controller.resume() }, onClose = close)
             // These keep their content on screen while listening for the answer.
             s is DialogState.AwaitingConfirmation -> ConfirmScreen(s, controller, partial)
+            s is DialogState.Outcome && s.followUp && !typing && !micDenied -> OutcomeScreen(
+                outcome = s,
+                listening = partial,
+                controller = controller,
+                onListen = listen,
+                onType = { typing = true },
+                onUseWithoutVoice = onUseWithoutVoice,
+            )
             s is DialogState.AwaitingInput && s.kind == InputKind.DISAMBIGUATION && !typing -> ClarifyScreen(s, controller, partial)
             partial != null -> ListeningScreen(
                 partial = partial,
@@ -272,6 +282,7 @@ private fun ModeScreen(onExit: () -> Unit, modifier: Modifier, controller: Acces
             )
             s is DialogState.Outcome -> OutcomeScreen(
                 outcome = s,
+                listening = partial,
                 controller = controller,
                 onListen = listen,
                 onType = { typing = true },
@@ -450,6 +461,7 @@ private fun ColumnScope.ReadingScreen(s: DialogState.ReadingList, controller: Ac
 @Composable
 private fun ColumnScope.OutcomeScreen(
     outcome: DialogState.Outcome,
+    listening: String?,
     controller: AccessAIController,
     onListen: () -> Unit,
     onType: () -> Unit,
@@ -463,7 +475,18 @@ private fun ColumnScope.OutcomeScreen(
     val tryAgain = Action("Try again", AccessAIIcons.Repeat, ActionVariant.PRIMARY, onClick = onListen)
     val done = Action("Done", AccessAIIcons.Check, ActionVariant.SECONDARY, onClick = controller::dismiss)
     when (outcome.kind) {
-        OutcomeKind.ANSWER -> Screen(
+        // A result that asks for more: AccessAI listens for the reply; Reply listens again.
+        OutcomeKind.ANSWER -> if (outcome.followUp) Screen(
+            key = key, cue = Cue.QUESTION, heading = outcome.title,
+            actions = listOf(
+                Action("Reply", AccessAIIcons.Mic, ActionVariant.PRIMARY, onClick = onListen),
+                Action("Repeat", AccessAIIcons.Repeat, ActionVariant.SECONDARY, compact = true, onClick = controller::repeat),
+                Action("Type instead", AccessAIIcons.Keyboard, ActionVariant.SECONDARY, compact = true, onClick = onType),
+            ),
+        ) {
+            listening?.let { ListeningStrip(it, "Tell me what you'd like to do.") }
+            Card { Text(text, style = t.title, color = t.onSurface) }
+        } else Screen(
             key = key, cue = Cue.CHIME, heading = outcome.title,
             actions = listOf(
                 Action("Repeat", AccessAIIcons.Repeat, ActionVariant.PRIMARY, onClick = controller::repeat),

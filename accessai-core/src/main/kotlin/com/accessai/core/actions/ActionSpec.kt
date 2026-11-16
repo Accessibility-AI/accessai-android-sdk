@@ -62,6 +62,11 @@ public sealed interface ActionResult {
         val value: String? = null,
         /** Optional secondary line, e.g. "Main account, as of 2:14 pm." */
         val detail: String? = null,
+        /**
+         * The announcement invites a reply, so AccessAI listens straight after it. Defaults to true for
+         * NAVIGATE actions (they usually open a screen and ask what to do there).
+         */
+        val followUp: Boolean? = null,
     ) : ActionResult
 
     public data class Failure(

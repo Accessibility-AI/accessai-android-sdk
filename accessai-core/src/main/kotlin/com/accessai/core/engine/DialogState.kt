@@ -56,6 +56,11 @@ public sealed interface DialogState {
         val actionId: String? = null,
         /** For [OutcomeKind.NOT_UNDERSTOOD]: misses in a row, so the UI can offer typing first after three. */
         val misses: Int = 0,
+        /**
+         * The result asks the user for more, e.g. "Transfer money screen. Tell me who to send to and how much."
+         * The UI listens for the reply once AccessAI has finished speaking.
+         */
+        val followUp: Boolean = false,
     ) : DialogState
 }
 

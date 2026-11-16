@@ -13,6 +13,7 @@ import com.accessai.core.actions.ParamType
 import com.accessai.core.actions.ParamValue
 import com.accessai.core.actions.Resolution
 import com.accessai.core.actions.ResolvedParams
+import com.accessai.core.actions.Sensitivity
 import com.accessai.core.actions.Validation
 import com.accessai.core.net.AccessAIBackend
 import com.accessai.core.net.BackendException
@@ -594,6 +595,7 @@ public class DialogEngine(
                         value = result.value,
                         detail = result.detail,
                         actionId = spec.id,
+                        followUp = result.followUp ?: (spec.sensitivity == Sensitivity.NAVIGATE),
                     )
                 } else {
                     misses = 0
@@ -721,9 +723,10 @@ public class DialogEngine(
         value: String? = null,
         detail: String? = null,
         actionId: String? = null,
+        followUp: Boolean = false,
     ) {
         if (kind != OutcomeKind.NOT_UNDERSTOOD) misses = 0
-        _state.value = DialogState.Outcome(kind, title, announcement, value, detail, actionId, misses)
+        _state.value = DialogState.Outcome(kind, title, announcement, value, detail, actionId, misses, followUp)
         say(announcement)
     }
 

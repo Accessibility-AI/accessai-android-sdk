@@ -26,6 +26,15 @@ class OutcomeTest {
     }
 
     @Test
+    fun `a navigation result asks for a reply, a read result does not`() = runTest {
+        val h = Harness()
+        h.engine.submit("I want to send money")
+        assertEquals(true, h.engine.outcome().followUp)
+        h.engine.submit("What is my balance?")
+        assertEquals(false, h.engine.outcome().followUp)
+    }
+
+    @Test
     fun `a confirmed action that succeeds is a success`() = runTest {
         val h = Harness()
         h.engine.submit("Send 5000 to David Adeyemi")
