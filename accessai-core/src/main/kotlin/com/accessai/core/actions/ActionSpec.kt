@@ -1,6 +1,7 @@
 package com.accessai.core.actions
 
 import com.accessai.core.Announcement
+import com.accessai.core.engine.ConfirmationDetails
 
 public enum class Sensitivity(public val wireName: String) {
     /** Reads data, e.g. balance. */
@@ -83,6 +84,7 @@ public class ActionSpec internal constructor(
     public val examples: List<String>,
     internal val validator: suspend (ResolvedParams) -> Validation,
     internal val summary: ((ResolvedParams) -> Announcement)?,
+    internal val details: ((ResolvedParams) -> ConfirmationDetails)?,
     /** Phrase the user must say to confirm, e.g. "confirm transfer". "confirm" is always accepted. */
     public val confirmPhrase: String,
     internal val handler: suspend (ActionContext) -> ActionResult,
@@ -127,6 +129,7 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
     private val examples = mutableListOf<String>()
     private var validator: suspend (ResolvedParams) -> Validation = { Validation.Valid }
     private var summary: ((ResolvedParams) -> Announcement)? = null
+    private var details: ((ResolvedParams) -> ConfirmationDetails)? = null
     private var handler: (suspend (ActionContext) -> ActionResult)? = null
 
     public fun text(name: String, description: String, required: Boolean = true, prompt: String = "What is the $name?", resolver: ParamResolver? = null) {
@@ -159,6 +162,11 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
         summary = block
     }
 
+    /** Optional structured read-back for the confirmation card. The spoken summary is still required. */
+    public fun details(block: (ResolvedParams) -> ConfirmationDetails) {
+        details = block
+    }
+
     public fun handler(block: suspend (ActionContext) -> ActionResult) {
         handler = block
     }
@@ -186,6 +194,7 @@ public class ActionSpecBuilder internal constructor(private val id: String) {
             examples = examples.toList(),
             validator = validator,
             summary = summary,
+            details = details,
             confirmPhrase = confirmPhrase.trim().lowercase(),
             handler = requireNotNull(handler) { "Action '$id' has no handler { }" },
         )

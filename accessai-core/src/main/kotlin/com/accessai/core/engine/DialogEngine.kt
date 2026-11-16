@@ -394,7 +394,7 @@ public class DialogEngine(
             spoken = "You are about to ${summary.spoken}. Say \"${spec.confirmPhrase}\" to continue, or \"cancel\" to stop.",
             display = "You are about to ${summary.display}. Say \"${spec.confirmPhrase}\" or tap Confirm to continue. Say \"cancel\" or tap Cancel to stop.",
         )
-        _state.value = DialogState.AwaitingConfirmation(spec.id, summary, spec.confirmPhrase, expiresAt)
+        _state.value = DialogState.AwaitingConfirmation(spec.id, summary, spec.confirmPhrase, expiresAt, detailsFor(spec, params))
         say(prompt)
     }
 
@@ -496,7 +496,7 @@ public class DialogEngine(
                     } else {
                         // Nothing was signed, so the same pending confirmation can be retried.
                         pending = p
-                        _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt)
+                        _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt, detailsFor(p.spec, p.params))
                         say(Announcement.of("$why Nothing was sent. Say \"${p.spec.confirmPhrase}\" to try again, or \"cancel\" to stop."))
                     }
                     return
@@ -521,7 +521,7 @@ public class DialogEngine(
                 }
                 BackendException.NOT_A_CONFIRMATION -> {
                     pending = p
-                    _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt)
+                    _state.value = DialogState.AwaitingConfirmation(p.spec.id, p.spec.summary!!(p.params), p.spec.confirmPhrase, p.expiresAt, detailsFor(p.spec, p.params))
                     reprompt(p, "That wasn't recognised as a confirmation.")
                 }
                 BackendException.CONFIRMATION_EXPIRED, BackendException.CONFIRMATION_USED -> {
@@ -533,6 +533,10 @@ public class DialogEngine(
         }
         execute(p.spec, p.params, token = confirmed.token, idempotencyKey = confirmed.nonce)
     }
+
+    /** A broken details builder never blocks a confirmation: the card falls back to the spoken summary. */
+    private fun detailsFor(spec: ActionSpec, params: ResolvedParams): ConfirmationDetails? =
+        spec.details?.let { build -> runCatching { build(params) }.getOrNull() }
 
     private fun reprompt(p: PendingConfirmation, preface: String?) {
         val summary = p.spec.summary!!(p.params)

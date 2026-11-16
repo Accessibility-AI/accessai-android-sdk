@@ -25,6 +25,8 @@ public sealed interface DialogState {
         val summary: Announcement,
         val confirmPhrase: String,
         val expiresAt: Instant,
+        /** The host's structured read-back for the confirmation card, when the action defines one. */
+        val details: ConfirmationDetails? = null,
     ) : DialogState
 
     /** The OS biometric / screen-lock prompt is showing. No token exists yet. */
@@ -73,6 +75,19 @@ public enum class OutcomeKind {
     /** The service was busy or failed. Nothing was sent or changed. */
     PROBLEM,
 }
+
+/**
+ * What a confirmation card shows, built by the host from the exact resolved parameters that will be confirmed,
+ * e.g. verb "Send", amount "₦5,000", recipient "David Adeyemi", recipientDetail "Account ending 2391",
+ * note "From Main account · Fee ₦0".
+ */
+public data class ConfirmationDetails(
+    val verb: String,
+    val amount: String? = null,
+    val recipient: String? = null,
+    val recipientDetail: String? = null,
+    val note: String? = null,
+)
 
 public enum class InputKind {
     /** A required parameter is missing. */
